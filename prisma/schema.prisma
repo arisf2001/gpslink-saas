@@ -368,3 +368,17 @@ model DeviceAlert {
 
   @@index([createdAt])
 }
+
+// "Prueba gratis": the account is only created after the 6-digit email code is confirmed. payload is AES-GCM encrypted (contains the password).
+model SignupVerification {
+  id        String   @id @default(cuid())
+  email     String
+  codeHash  String
+  payload   String   @db.Text
+  attempts  Int      @default(0)
+  resends   Int      @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}

@@ -1,16 +1,18 @@
 "use client";
 
 import { useActionState } from "react";
-import { registerAction, type RegisterState } from "./actions";
+import { codeAction, registerAction, type RegisterState } from "./actions";
 
 type PlanOption = { id: string; label: string };
 
 export function RegisterForm({ plans, planId }: { plans: PlanOption[]; planId: string }) {
   const [state, action, pending] = useActionState<RegisterState, FormData>(registerAction, {});
   const v = state.values ?? {};
+  if (state.step === "code") return <CodeForm start={state} />;
   return (
     <form action={action} className="form">
       {state.error && <div className="err" role="alert">{state.error}</div>}
+      <input name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" style={{ position: "absolute", left: -9999, width: 1, height: 1, opacity: 0 }} />
       <label>
         Equipos para tu prueba
         <select name="planId" defaultValue={v.planId ?? planId} required>
@@ -53,8 +55,41 @@ export function RegisterForm({ plans, planId }: { plans: PlanOption[]; planId: s
       <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}>
         <input name="terms" type="checkbox" required style={{ width: "auto" }} /> Acepto los términos del servicio
       </label>
-      <button className="btn" disabled={pending}>{pending ? "Creando tu plataforma..." : "Crear mi cuenta gratis"}</button>
+      <button className="btn" disabled={pending}>{pending ? "Enviando código..." : "Crear mi cuenta gratis"}</button>
       <p className="hint" style={{ textAlign: "center" }}>No pedimos tarjeta. Te avisamos 3, 2 y 1 día antes de que termine la prueba.</p>
     </form>
+  );
+}
+
+function CodeForm({ start }: { start: RegisterState }) {
+  const [state, action, pending] = useActionState<RegisterState, FormData>(codeAction, start);
+  if (state.step !== "code") return <RegisterFormAgain state={state} />;
+  return (
+    <form action={action} className="form">
+      <input type="hidden" name="vid" value={state.vid ?? ""} />
+      <p style={{ margin: 0 }}>Te enviamos un código de 6 números a <b>{state.email}</b>. Escríbelo aquí para crear tu cuenta.</p>
+      {state.error && <div className="err" role="alert">{state.error}</div>}
+      {state.info && !state.error && <div className="hint" role="status">{state.info}</div>}
+      <label>
+        Código
+        <input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,7}" maxLength={7} required autoFocus placeholder="123456" style={{ fontSize: 22, letterSpacing: 6, textAlign: "center" }} />
+        <span className="hint">Vence en 15 minutos. Si no lo ves, revisa el correo no deseado (spam).</span>
+      </label>
+      <button className="btn" name="op" value="verify" disabled={pending}>{pending ? "Verificando..." : "Verificar y crear mi cuenta"}</button>
+      <p className="hint" style={{ textAlign: "center" }}>
+        <button type="submit" name="op" value="resend" formNoValidate disabled={pending} style={{ background: "none", border: 0, color: "inherit", textDecoration: "underline", cursor: "pointer", padding: 0 }}>Reenviar código</button>
+        {" · "}
+        <a href="/registro">Cambiar mis datos</a>
+      </p>
+    </form>
+  );
+}
+
+function RegisterFormAgain({ state }: { state: RegisterState }) {
+  return (
+    <div className="form">
+      {state.error && <div className="err" role="alert">{state.error}</div>}
+      <a className="btn" href="/registro" style={{ textAlign: "center" }}>Volver al formulario</a>
+    </div>
   );
 }
