@@ -44,15 +44,17 @@ async function apiHash(forceRefresh = false): Promise<string> {
   return cachedHash;
 }
 
-async function call(method: "POST" | "PUT", path: string, body: Record<string, unknown>, retried = false): Promise<Record<string, unknown>> {
+async function call(method: "GET" | "POST" | "PUT", path: string, body: Record<string, unknown>, retried = false): Promise<Record<string, unknown>> {
   const hash = await apiHash(retried);
-  const res = await fetch(`${trackerUrl()}/api/admin/${path}?lang=es`, {
+  const query = method === "GET" ? `&${new URLSearchParams(body as Record<string, string>)}` : "";
+  const res = await fetch(`${trackerUrl()}/api/admin/${path}?lang=es${query}`, {
     method,
     headers: { "Content-Type": "application/json", Accept: "application/json", "user-api-hash": hash },
-    body: JSON.stringify(body),
+    body: method === "GET" ? undefined : JSON.stringify(body),
   });
   if (res.status === 401 && !retried && !process.env.GPSWOX_API_HASH) return call(method, path, body, true);
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (method === "GET" && res.ok) return data;
   if (!res.ok || data.status !== 1) {
     const errors = data.errors ? JSON.stringify(data.errors) : String(data.message ?? res.statusText);
     throw new Error(`GPSWOX ${path} respondió ${res.status}: ${errors}`);
@@ -83,10 +85,16 @@ export async function createReseller(input: ResellerInput): Promise<number> {
   return id;
 }
 
-export async function setResellerActive(email: string, active: boolean): Promise<void> {
-  if (isMock()) return;
+// Activates or deactivates any GPSWOX user (a reseller or one of its clients).
+export async function setUserActive(email: string, active: boolean): Promise<void> {
+  if (isMock()) {
+    await prisma.mockClient.updateMany({ where: { email }, data: { active } });
+    return;
+  }
   await call("POST", "client/status", { email, status: active ? 1 : 0 });
 }
+
+export const setResellerActive = setUserActive;
 
 export async function updateReseller(id: number, email: string, changes: { devicesLimit: number; expiresAt: Date; active: boolean }): Promise<void> {
   if (isMock()) return;
@@ -110,30 +118,110 @@ export function resellerLoginUrl(): string {
 
 export type GpswoxDevice = { id: number; createdAt: Date };
 
-// Devices of the reseller and of its clients, oldest first. Read-only access to the GPSWOX database.
-export async function deviceList(userId: number): Promise<GpswoxDevice[]> {
-  if (isMock()) {
-    const devices = await prisma.mockDevice.findMany({ where: { gpswoxUserId: userId }, orderBy: { createdAt: "asc" } });
-    return devices.map((d) => ({ id: d.id, createdAt: d.createdAt }));
-  }
+type TreeNode = { id: number; managerId: number | null };
+
+async function withGpswoxDb<T>(fn: (conn: mysql.Connection) => Promise<T>): Promise<T> {
   const url = process.env.GPSWOX_DB_URL;
   if (!url) throw new Error("GPSWOX_DB_URL no configurado");
   const conn = await mysql.createConnection(url);
   try {
-    const [rows] = await conn.query<RowDataPacket[]>(
-      `SELECT d.id AS id, d.created_at AS created_at
-         FROM devices d
-         JOIN user_device_pivot p ON p.device_id = d.id
-         JOIN users u ON u.id = p.user_id
-        WHERE u.id = ? OR u.manager_id = ?
-        GROUP BY d.id, d.created_at
-        ORDER BY d.created_at`,
-      [userId, userId],
-    );
-    return rows.map((r) => ({ id: Number(r.id), createdAt: new Date(r.created_at) }));
+    return await fn(conn);
   } finally {
     await conn.end();
   }
+}
+
+// Every user below a reseller: its clients, its dealers and the dealers' clients.
+async function subtree(rootId: number): Promise<TreeNode[]> {
+  if (isMock()) {
+    const all = await prisma.mockClient.findMany();
+    const out: TreeNode[] = [];
+    const walk = (parent: number, depth: number) => {
+      if (depth > 10) return;
+      for (const c of all.filter((m) => m.managerId === parent)) {
+        out.push({ id: c.id, managerId: c.managerId });
+        walk(c.id, depth + 1);
+      }
+    };
+    walk(rootId, 0);
+    return out;
+  }
+  return withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>(
+      `WITH RECURSIVE t AS (
+         SELECT id, manager_id, 1 AS lvl FROM users WHERE manager_id = ?
+         UNION ALL
+         SELECT u.id, u.manager_id, t.lvl + 1 FROM users u JOIN t ON u.manager_id = t.id WHERE t.lvl < 10
+       ) SELECT DISTINCT id, manager_id FROM t`,
+      [rootId],
+    );
+    return rows.map((r) => ({ id: Number(r.id), managerId: r.manager_id === null ? null : Number(r.manager_id) }));
+  });
+}
+
+async function deviceLinks(userIds: number[]): Promise<{ userId: number; deviceId: number; createdAt: Date }[]> {
+  if (!userIds.length) return [];
+  if (isMock()) {
+    const devices = await prisma.mockDevice.findMany({ where: { gpswoxUserId: { in: userIds } } });
+    return devices.map((d) => ({ userId: d.gpswoxUserId, deviceId: d.id, createdAt: d.createdAt }));
+  }
+  return withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>(
+      `SELECT p.user_id AS user_id, d.id AS id, d.created_at AS created_at
+         FROM user_device_pivot p JOIN devices d ON d.id = p.device_id
+        WHERE p.user_id IN (?)`,
+      [userIds],
+    );
+    return rows.map((r) => ({ userId: Number(r.user_id), deviceId: Number(r.id), createdAt: new Date(r.created_at) }));
+  });
+}
+
+// Devices of the reseller, its clients, its dealers and the dealers' clients, oldest first. Read-only access to the GPSWOX database.
+export async function deviceList(userId: number): Promise<GpswoxDevice[]> {
+  const ids = [userId, ...(await subtree(userId)).map((n) => n.id)];
+  const unique = new Map<number, Date>();
+  for (const l of await deviceLinks(ids)) unique.set(l.deviceId, l.createdAt);
+  return [...unique].map(([id, createdAt]) => ({ id, createdAt })).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+}
+
+export type GpswoxClient = { id: number; managerId: number | null; email: string; phone: string | null; isDealer: boolean; active: boolean; devices: number };
+
+async function contactInfo(ids: Set<number>): Promise<Map<number, { email: string; phone: string | null; groupId: number; active: boolean }>> {
+  const out = new Map<number, { email: string; phone: string | null; groupId: number; active: boolean }>();
+  if (isMock()) {
+    for (const c of await prisma.mockClient.findMany({ where: { id: { in: [...ids] } } })) out.set(c.id, { email: c.email, phone: c.phone, groupId: c.groupId, active: c.active });
+    return out;
+  }
+  const limit = 500;
+  for (let page = 1; page <= 100 && out.size < ids.size; page++) {
+    const data = await call("GET", "clients", { limit: String(limit), page: String(page) });
+    const items = (data.data ?? []) as { id: number; email: string; phone_number: string | null; group_id: number; active: number | boolean }[];
+    for (const u of items) if (ids.has(Number(u.id))) out.set(Number(u.id), { email: u.email, phone: u.phone_number || null, groupId: Number(u.group_id), active: !!Number(u.active) });
+    if (items.length < limit) break;
+  }
+  return out;
+}
+
+// The clients and dealers below a reseller, each with the devices of its own subtree.
+export async function clientsUnder(rootId: number): Promise<GpswoxClient[]> {
+  const nodes = await subtree(rootId);
+  if (!nodes.length) return [];
+  const links = await deviceLinks(nodes.map((n) => n.id));
+  const own = new Map<number, Set<number>>();
+  for (const l of links) (own.get(l.userId) ?? own.set(l.userId, new Set()).get(l.userId)!).add(l.deviceId);
+  const children = new Map<number, number[]>();
+  for (const n of nodes) if (n.managerId !== null) (children.get(n.managerId) ?? children.set(n.managerId, []).get(n.managerId)!).push(n.id);
+  const devicesOf = (id: number, depth = 0): Set<number> => {
+    const set = new Set(own.get(id) ?? []);
+    if (depth < 10) for (const c of children.get(id) ?? []) for (const d of devicesOf(c, depth + 1)) set.add(d);
+    return set;
+  };
+  const info = await contactInfo(new Set(nodes.map((n) => n.id)));
+  return nodes.flatMap((n) => {
+    const i = info.get(n.id);
+    if (!i) return [];
+    return [{ id: n.id, managerId: n.managerId === rootId ? null : n.managerId, email: i.email, phone: i.phone, isDealer: i.groupId === 3, active: i.active, devices: devicesOf(n.id).size }];
+  });
 }
 
 export async function setDeviceExpiration(deviceId: number, expiresAt: Date): Promise<void> {

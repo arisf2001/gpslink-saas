@@ -5,6 +5,7 @@ import { DAY_MS, RESELLER_OPEN_DAYS, TRIAL_DAYS, appUrl } from "./config";
 import { closedPeriod, devicesToBill, unitPrice } from "./billing";
 import { formatDate, formatMoney } from "./format";
 import { createReseller, deviceList, resellerLoginUrl, setResellerActive, updateReseller } from "./gpswox";
+import { runClientLifecycle } from "./clients";
 import { plusOneYear, reminderDayFor } from "./lifecycle";
 import { emailHtml, sendEmail, sendWhatsApp, type ChannelResult } from "./notify";
 
@@ -200,10 +201,18 @@ export async function unblockCompany(company: Company, now = new Date()): Promis
 const dayKey = (d: Date) => d.toISOString().slice(0, 10);
 
 export async function runDailyLifecycle(now = new Date()) {
-  const summary = { reminders: 0, blocked: 0, invoices: 0, errors: 0 };
+  const summary = { reminders: 0, blocked: 0, invoices: 0, clientReminders: 0, clientsBlocked: 0, errors: 0 };
   for (const company of await prisma.company.findMany({ where: { status: { in: ["TRIAL", "ACTIVE", "BLOCKED"] } } })) {
     try {
       await syncDevices(company, now);
+      try {
+        const clients = await runClientLifecycle(company, now);
+        summary.clientReminders += clients.reminders;
+        summary.clientsBlocked += clients.blocked;
+      } catch (error) {
+        summary.errors++;
+        console.error(`[clientes] ${company.id}:`, (error as Error).message);
+      }
       if (company.status === "TRIAL") {
         if (now >= company.trialEndsAt) await prisma.company.update({ where: { id: company.id }, data: { status: "ACTIVE" } });
         const days = reminderDayFor(company.trialEndsAt, now);

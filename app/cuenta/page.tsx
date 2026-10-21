@@ -8,6 +8,7 @@ import { getSession } from "@/lib/session";
 import { getStripe } from "@/lib/stripe";
 import { SiteNav } from "../site-nav";
 import { logoutAction, payAction } from "./actions";
+import { CuentaNav } from "./cuenta-nav";
 import { LoginForm } from "./login-form";
 
 export const dynamic = "force-dynamic";
@@ -61,6 +62,7 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
           <h1 className="page-title">{company.name}</h1>
           <form action={logoutAction}><button className="btn sm s">Salir</button></form>
         </div>
+        <CuentaNav active="cuenta" />
         <div style={{ display: "grid", gap: 12, margin: "12px 0" }}>
           {params.bienvenido && <div className="ok">¡Listo! Tu plataforma de rastreo ya está creada. Te enviamos los datos por correo y WhatsApp.</div>}
           {paymentNotice && <div className="ok">{paymentNotice}</div>}

@@ -66,6 +66,8 @@ model Company {
   invoices             Invoice[]
   notifications        Notification[]
   devices              BilledDevice[]
+  clientPlans          ClientPlan[]
+  endClients           EndClient[]
 }
 
 // One GPSWOX device of a company. nextBillAt is when it must appear on an invoice (trial end or its yearly anniversary).
@@ -124,5 +126,78 @@ model MockDevice {
 
 model ProcessedEvent {
   id        String   @id
+  createdAt DateTime @default(now())
+}
+
+// A white label's own plan for its clients: price per device for each period of `months`.
+model ClientPlan {
+  id         String      @id @default(cuid())
+  companyId  String
+  company    Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name       String
+  priceCents Int
+  currency   String      @default("usd")
+  months     Int         @default(12)
+  active     Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  clients    EndClient[]
+}
+
+// A GPSWOX user under a white label: its client, one of its dealers, or a dealer's client.
+// Without a plan it never expires.
+model EndClient {
+  id           String          @id @default(cuid())
+  companyId    String
+  company      Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  gpswoxUserId Int
+  managerId    Int?
+  email        String
+  phone        String?
+  isDealer     Boolean         @default(false)
+  devices      Int             @default(0)
+  planId       String?
+  plan         ClientPlan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
+  paidUntil    DateTime?
+  blockReason  String?
+  goneAt       DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  payments     ClientPayment[]
+  notices      ClientNotice[]
+
+  @@unique([companyId, gpswoxUserId])
+}
+
+model ClientPayment {
+  id          String    @id @default(cuid())
+  endClientId String
+  endClient   EndClient @relation(fields: [endClientId], references: [id], onDelete: Cascade)
+  amountCents Int
+  currency    String
+  periods     Int
+  method      String
+  note        String?
+  paidUntil   DateTime
+  createdAt   DateTime  @default(now())
+}
+
+model ClientNotice {
+  id          String    @id @default(cuid())
+  endClientId String
+  endClient   EndClient @relation(fields: [endClientId], references: [id], onDelete: Cascade)
+  kind        String
+  dedupeKey   String    @unique
+  channels    String
+  error       String?   @db.Text
+  createdAt   DateTime  @default(now())
+}
+
+model MockClient {
+  id        Int      @id @default(autoincrement())
+  managerId Int
+  email     String
+  phone     String?
+  groupId   Int      @default(2)
+  active    Boolean  @default(true)
   createdAt DateTime @default(now())
 }

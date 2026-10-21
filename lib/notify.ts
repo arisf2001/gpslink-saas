@@ -7,18 +7,18 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
 
-export function emailHtml(title: string, lines: string[], cta?: { label: string; url: string }): string {
+export function emailHtml(title: string, lines: string[], cta?: { label: string; url: string }, brand: { name: string; contact: string } = { name: BRAND.name, contact: BRAND.supportEmail }): string {
   const body = lines.map((l) => `<p style="margin:0 0 12px;color:#334155;font-size:15px;line-height:1.5">${escapeHtml(l)}</p>`).join("");
   const button = cta
     ? `<p style="margin:20px 0"><a href="${escapeHtml(cta.url)}" style="background:#0F4C5C;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:600;display:inline-block">${escapeHtml(cta.label)}</a></p>`
     : "";
   return `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:24px">
-<div style="font-weight:800;font-size:20px;color:#0F4C5C;margin-bottom:16px">${BRAND.name}</div>
+<div style="font-weight:800;font-size:20px;color:#0F4C5C;margin-bottom:16px">${escapeHtml(brand.name)}</div>
 <h1 style="font-size:20px;color:#0f172a;margin:0 0 16px">${escapeHtml(title)}</h1>${body}${button}
-<p style="margin-top:24px;color:#94a3b8;font-size:12px">${BRAND.name} · ${escapeHtml(BRAND.supportEmail)}</p></div>`;
+<p style="margin-top:24px;color:#94a3b8;font-size:12px">${escapeHtml(brand.name)} · ${escapeHtml(brand.contact)}</p></div>`;
 }
 
-export async function sendEmail(to: string, subject: string, html: string): Promise<ChannelResult> {
+export async function sendEmail(to: string, subject: string, html: string, opts: { fromName?: string; replyTo?: string } = {}): Promise<ChannelResult> {
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM } = process.env;
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
     console.log(`[email:dev] to=${to} subject=${subject}`);
@@ -27,7 +27,8 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
   try {
     const port = Number(SMTP_PORT ?? 587);
     const transport = nodemailer.createTransport({ host: SMTP_HOST, port, secure: port === 465, auth: { user: SMTP_USER, pass: SMTP_PASS } });
-    await transport.sendMail({ from: SMTP_FROM ?? `${BRAND.name} <${SMTP_USER}>`, to, subject, html });
+    const from = opts.fromName ? `"${opts.fromName.replace(/["<>]/g, "")}" <${SMTP_USER}>` : SMTP_FROM ?? `${BRAND.name} <${SMTP_USER}>`;
+    await transport.sendMail({ from, to, subject, html, replyTo: opts.replyTo });
     return { channel: "email", ok: true };
   } catch (error) {
     return { channel: "email", ok: false, error: (error as Error).message };
