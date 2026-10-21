@@ -4,6 +4,8 @@ import { CATEGORY_LABELS } from "./format";
 
 export const PACKAGE_SIZES = [50, 100, 300, 400, 500, 1000] as const;
 
+export const DEFAULT_TIERS = [1, 26, 51, 101];
+
 export const DEFAULT_FEATURES = [
   "Plataforma web con tu marca, gratis",
   "App móvil con tu marca, gratis",
@@ -17,8 +19,8 @@ export const DEFAULT_FEATURES = [
 // Prices start at $0 on purpose: the owner sets real prices from /admin before going live.
 export async function ensureDefaultPlans() {
   const categories = Object.keys(CATEGORY_LABELS) as PlanCategory[];
-  const [plans, prices] = await Promise.all([prisma.plan.count(), prisma.categoryPrice.count()]);
-  if (plans >= categories.length * PACKAGE_SIZES.length && prices >= categories.length) return;
+  const [plans, prices] = await Promise.all([prisma.plan.count(), prisma.priceTier.count()]);
+  if (plans >= categories.length * PACKAGE_SIZES.length && prices >= DEFAULT_TIERS.length) return;
   for (const [ci, category] of categories.entries()) {
     for (const [si, devices] of PACKAGE_SIZES.entries()) {
       await prisma.plan.upsert({
@@ -35,8 +37,8 @@ export async function ensureDefaultPlans() {
         },
       });
     }
-    await prisma.categoryPrice.upsert({ where: { category }, update: {}, create: { category } });
   }
+  for (const minDevices of DEFAULT_TIERS) await prisma.priceTier.upsert({ where: { minDevices }, update: {}, create: { minDevices } });
 }
 
 export function featureList(features: string): string[] {

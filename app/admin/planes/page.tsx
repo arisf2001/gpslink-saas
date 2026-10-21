@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { CATEGORY_LABELS } from "@/lib/format";
 import { ensureDefaultPlans } from "@/lib/plans";
 import { getSession } from "@/lib/session";
-import { saveCategoryPriceAction, savePlanAction } from "../actions";
+import { savePlanAction, saveTiersAction } from "../actions";
 import { AdminShell } from "../admin-shell";
 
 export const dynamic = "force-dynamic";
@@ -13,45 +12,49 @@ export default async function PlanesPage({ searchParams }: { searchParams: Promi
   const { ok, error } = await searchParams;
   await ensureDefaultPlans();
   const plans = await prisma.plan.findMany({ orderBy: [{ sortOrder: "asc" }, { devices: "asc" }] });
-  const prices = new Map((await prisma.categoryPrice.findMany()).map((p) => [p.category, p]));
+  const tiers = await prisma.priceTier.findMany({ orderBy: { minDevices: "asc" } });
 
   return (
     <AdminShell>
       <h1 className="page-title">Planes y precios</h1>
-      <p className="hint" style={{ fontSize: 14, marginBottom: 12 }}>Precio por año en dólares. El paquete compra esa cantidad de equipos; cada equipo cuenta su año desde que se agrega. Si el precio está en 0, la página muestra &quot;Consultar&quot; y no se puede pagar en línea. Una característica por línea.</p>
-      {error && <div className="err" style={{ marginBottom: 10 }}>Precio no válido. Usa solo números, por ejemplo 1490 o 1490.50.</div>}
-      {(Object.keys(CATEGORY_LABELS) as (keyof typeof CATEGORY_LABELS)[]).map((cat) => (
-        <div key={cat} className="panel" style={{ marginBottom: 18, padding: 18 }}>
-          <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 10 }}>{CATEGORY_LABELS[cat]}</h2>
-          <table className="t">
-            <thead><tr><th>Equipos</th><th>Nombre</th><th>Precio/año (USD)</th><th>Incluye</th><th>Visible</th><th>Destacado</th><th></th></tr></thead>
-            <tbody>
-              {plans.filter((p) => p.category === cat).map((p) => (
-                <tr key={p.id} style={ok === p.id ? { background: "#f0fdf4" } : undefined}>
-                  <td><b>{p.devices}</b></td>
-                  <td colSpan={6} style={{ padding: 0 }}>
-                    <form action={savePlanAction} className="row" style={{ padding: 10, alignItems: "flex-start" }}>
-                      <input type="hidden" name="id" value={p.id} />
-                      <input name="name" defaultValue={p.name} style={{ width: 130 }} aria-label="Nombre" />
-                      <input name="price" defaultValue={(p.priceCents / 100).toString()} inputMode="decimal" aria-label="Precio por año" />
-                      <textarea name="features" defaultValue={p.features} rows={3} style={{ flex: 1, minWidth: 240, font: "inherit", padding: 6, border: "1.5px solid #d1d5db", borderRadius: 8 }} aria-label="Incluye" />
-                      <label className="row" style={{ fontSize: 13 }}><input type="checkbox" name="active" defaultChecked={p.active} style={{ width: "auto" }} /> Visible</label>
-                      <label className="row" style={{ fontSize: 13 }}><input type="checkbox" name="highlighted" defaultChecked={p.highlighted} style={{ width: "auto" }} /> Destacado</label>
-                      <button className="btn sm">{ok === p.id ? "Guardado ✓" : "Guardar"}</button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <form action={saveCategoryPriceAction} className="row" style={{ marginTop: 12, alignItems: "flex-end" }}>
-            <input type="hidden" name="category" value={cat} />
-            <label style={{ fontSize: 13 }}>Bloque de 10 equipos extra (USD/año)<input name="blockPrice" defaultValue={((prices.get(cat)?.blockPriceCents ?? 0) / 100).toString()} inputMode="decimal" /></label>
-            <label style={{ fontSize: 13 }}>Renovación por equipo (USD/año)<input name="renewalPrice" defaultValue={((prices.get(cat)?.renewalPriceCents ?? 0) / 100).toString()} inputMode="decimal" /></label>
-            <button className="btn sm">{ok === `precios-${cat}` ? "Guardado ✓" : "Guardar"}</button>
-          </form>
-        </div>
-      ))}
+      {error && <div className="err" style={{ marginBottom: 10 }}>Precio no válido. Usa solo números, por ejemplo 6 o 5.50.</div>}
+      <div className="panel" style={{ marginBottom: 18, padding: 18 }}>
+        <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 6 }}>Precio por equipo al año (USD)</h2>
+        <p className="hint" style={{ marginBottom: 12 }}>El precio se escoge según cuántos equipos activos tiene la empresa el día de la factura. Si está en 0, la página muestra &quot;Consultar&quot;.</p>
+        <form action={saveTiersAction} className="row" style={{ alignItems: "flex-end" }}>
+          {tiers.map((t, i) => (
+            <label key={t.id} style={{ fontSize: 13 }}>{t.minDevices}{tiers[i + 1] ? ` a ${tiers[i + 1].minDevices - 1}` : " o más"} equipos
+              <input name={`price-${t.id}`} defaultValue={(t.priceCents / 100).toString()} inputMode="decimal" style={{ width: 110 }} />
+            </label>
+          ))}
+          <button className="btn sm">{ok === "tramos" ? "Guardado ✓" : "Guardar precios"}</button>
+        </form>
+      </div>
+      <div className="panel" style={{ padding: 18 }}>
+        <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 6 }}>Límites de equipos al registrarse</h2>
+        <p className="hint" style={{ marginBottom: 12 }}>La empresa elige uno al registrarse; es la cantidad máxima de equipos que puede subir. Tú lo puedes subir después desde la empresa.</p>
+        <table className="t">
+          <thead><tr><th>Equipos</th><th>Nombre · visible · destacado</th></tr></thead>
+          <tbody>
+            {plans.map((p) => (
+              <tr key={p.id} style={ok === p.id ? { background: "#f0fdf4" } : undefined}>
+                <td><b>{p.devices}</b></td>
+                <td>
+                  <form action={savePlanAction} className="row">
+                    <input type="hidden" name="id" value={p.id} />
+                    <input type="hidden" name="price" value={(p.priceCents / 100).toString()} />
+                    <input type="hidden" name="features" value={p.features} />
+                    <input name="name" defaultValue={p.name} style={{ width: 150 }} aria-label="Nombre" />
+                    <label className="row" style={{ fontSize: 13 }}><input type="checkbox" name="active" defaultChecked={p.active} style={{ width: "auto" }} /> Visible</label>
+                    <label className="row" style={{ fontSize: 13 }}><input type="checkbox" name="highlighted" defaultChecked={p.highlighted} style={{ width: "auto" }} /> Destacado</label>
+                    <button className="btn sm">{ok === p.id ? "Guardado ✓" : "Guardar"}</button>
+                  </form>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </AdminShell>
   );
 }

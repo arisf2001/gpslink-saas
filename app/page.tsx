@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { TRIAL_DAYS } from "@/lib/config";
-import { CATEGORY_LABELS } from "@/lib/format";
-import { ensureDefaultPlans, featureList } from "@/lib/plans";
+import { ensureDefaultPlans } from "@/lib/plans";
 import { SiteNav } from "./site-nav";
-import { PlanTabs, type PublicPlan } from "./plan-tabs";
+import { PricingTiers, type PublicTier } from "./plan-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -48,25 +47,15 @@ const FEATURE_GROUPS = [
       "Servidores, seguridad y mantenimiento",
       "Soporte técnico de GPS Link",
       "Bloques de 10 equipos cuando necesites crecer",
-      "Cada equipo cuenta su año desde que lo agregas",
+      "Pagas a fin de mes solo los equipos que subiste",
     ],
   },
 ];
 
 export default async function Home() {
   await ensureDefaultPlans();
-  const plans = await prisma.plan.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { devices: "asc" }] });
-  const publicPlans: PublicPlan[] = plans.map((p) => ({
-    id: p.id,
-    category: p.category,
-    devices: p.devices,
-    name: p.name,
-    priceCents: p.priceCents,
-    currency: p.currency,
-    features: featureList(p.features),
-    highlighted: p.highlighted,
-  }));
-  const blockPrices = Object.fromEntries((await prisma.categoryPrice.findMany()).map((p) => [p.category, { priceCents: p.blockPriceCents, currency: p.currency }]));
+  const tierRows = await prisma.priceTier.findMany({ orderBy: { minDevices: "asc" } });
+  const tiers: PublicTier[] = tierRows.map((t, i) => ({ id: t.id, minDevices: t.minDevices, maxDevices: tierRows[i + 1] ? tierRows[i + 1].minDevices - 1 : null, priceCents: t.priceCents, currency: t.currency }));
   const months = Math.round(TRIAL_DAYS / 30);
 
   return (
@@ -100,8 +89,8 @@ export default async function Home() {
       <section id="planes">
         <div className="wrap">
           <h2>Planes</h2>
-          <div className="sub">Pago anual. Paquetes por equipo GPS.</div>
-          <PlanTabs plans={publicPlans} labels={CATEGORY_LABELS} trialMonths={months} blockPrices={blockPrices} />
+          <div className="sub">Pagas por equipo al año. Mientras más equipos, mejor precio.</div>
+          <PricingTiers tiers={tiers} trialMonths={months} />
         </div>
       </section>
 
@@ -124,7 +113,7 @@ export default async function Home() {
         <div className="wrap">
           <h2>Cómo funciona</h2>
           <div className="steps">
-            <div className="st"><div className="c">1</div><b>Elige tu paquete</b><span>Te registras gratis, sin tarjeta, y empiezas tus {months} meses.</span></div>
+            <div className="st"><div className="c">1</div><b>Regístrate gratis</b><span>Sin tarjeta. Empiezas tus {months} meses de prueba.</span></div>
             <div className="st"><div className="c">2</div><b>Pon tu marca</b><span>Subes tu logo y colores en tu plataforma.</span></div>
             <div className="st"><div className="c">3</div><b>Vende a tus clientes</b><span>Creas tus paquetes, cobras a tu manera y conectas sus GPS.</span></div>
             <div className="st"><div className="c">4</div><b>Crece con dealers</b><span>Tus dealers venden con su propia marca usando tus equipos.</span></div>

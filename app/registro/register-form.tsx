@@ -16,7 +16,7 @@ export function RegisterForm({ plans, planId }: { plans: PlanOption[]; planId: s
         <select name="planId" defaultValue={v.planId ?? planId} required>
           {plans.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
         </select>
-        <span className="hint">Durante la prueba puedes usar hasta esa cantidad de equipos. Al terminar eliges y pagas tu paquete.</span>
+        <span className="hint">Es la cantidad máxima de equipos que puedes subir; se puede aumentar después. Solo pagas los equipos que subes.</span>
       </label>
       <label>
         Nombre de tu empresa

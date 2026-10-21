@@ -36,13 +36,13 @@ model Plan {
   @@unique([category, devices])
 }
 
-// Price of a block of 10 extra devices and of renewing one device for a year, per category.
-model CategoryPrice {
-  category          PlanCategory @id
-  blockPriceCents   Int          @default(0)
-  renewalPriceCents Int          @default(0)
-  currency          String       @default("usd")
-  updatedAt         DateTime     @updatedAt
+// Yearly price per device; the tier is picked by how many active devices the company has.
+model PriceTier {
+  id         String   @id @default(cuid())
+  minDevices Int      @unique
+  priceCents Int      @default(0)
+  currency   String   @default("usd")
+  updatedAt  DateTime @updatedAt
 }
 
 model Company {
@@ -58,53 +58,51 @@ model Company {
   status               CompanyStatus  @default(TRIAL)
   trialEndsAt          DateTime
   gpswoxUserId         Int?
-  gpswoxLimit          Int?
+  deviceLimit          Int            @default(50)
   provisionError       String?        @db.Text
   stripeCustomerId     String?
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
-  payments             Payment[]
+  invoices             Invoice[]
   notifications        Notification[]
-  slots                Slot[]
+  devices              BilledDevice[]
 }
 
-model Payment {
-  id          String   @id @default(cuid())
-  companyId   String
-  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  kind        String
-  devices     Int
-  planId      String?
-  amountCents Int
-  currency    String
-  method      String
-  reference   String?  @unique
-  note        String?
-  createdAt   DateTime @default(now())
-  slots       Slot[]
+// One GPSWOX device of a company. nextBillAt is when it must appear on an invoice (trial end or its yearly anniversary).
+model BilledDevice {
+  id         String    @id @default(cuid())
+  companyId  String
+  company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deviceId   Int
+  addedAt    DateTime
+  nextBillAt DateTime
+  removedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([companyId, deviceId])
 }
 
-// One paid device for one year. The year starts when a device takes the slot.
-model Slot {
-  id              String    @id @default(cuid())
-  companyId       String
-  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  paymentId       String
-  payment         Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  deviceId        Int?
-  startsAt        DateTime?
-  endsAt          DateTime?
-  expiredNotified Boolean   @default(false)
-  createdAt       DateTime  @default(now())
+model Invoice {
+  id             String    @id @default(cuid())
+  companyId      String
+  company        Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  periodStart    DateTime
+  periodEnd      DateTime
+  dueAt          DateTime
+  devices        Int
+  newDevices     Int
+  renewals       Int
+  unitPriceCents Int
+  amountCents    Int
+  currency       String    @default("usd")
+  status         String    @default("OPEN")
+  paidAt         DateTime?
+  method         String?
+  reference      String?   @unique
+  note           String?
+  createdAt      DateTime  @default(now())
 
-  @@index([companyId])
-}
-
-// Last expiration date pushed to GPSWOX for each device, to avoid repeating API calls.
-model DeviceSync {
-  deviceId  Int      @id
-  companyId String
-  expiresAt DateTime
+  @@unique([companyId, periodStart])
 }
 
 model Notification {

@@ -1,10 +1,11 @@
 import bcrypt from "bcryptjs";
-import type { Company, Plan, Slot } from "@prisma/client";
+import type { Company, Plan } from "@prisma/client";
 import { prisma } from "./db";
-import { ADDON_DEVICES, DAY_MS, RENEWAL_WINDOW_DAYS, RESELLER_OPEN_DAYS, TRIAL_DAYS, appUrl } from "./config";
+import { DAY_MS, RESELLER_OPEN_DAYS, TRIAL_DAYS, appUrl } from "./config";
+import { closedPeriod, devicesToBill, unitPrice } from "./billing";
 import { formatDate, formatMoney } from "./format";
-import { createReseller, deviceList, resellerLoginUrl, setDeviceExpiration, setResellerActive, updateReseller } from "./gpswox";
-import { assignSlots, deviceExpirations, reminderDayFor, renewedEnd, shouldBlock, trialReminderDue, usableSlots } from "./lifecycle";
+import { createReseller, deviceList, resellerLoginUrl, setResellerActive, updateReseller } from "./gpswox";
+import { plusOneYear, reminderDayFor } from "./lifecycle";
 import { emailHtml, sendEmail, sendWhatsApp, type ChannelResult } from "./notify";
 
 export type CompanyWithPlan = Company & { plan: Plan };
@@ -20,7 +21,6 @@ export type RegisterInput = {
 };
 
 export class RegistrationError extends Error {}
-export class PurchaseError extends Error {}
 
 export async function registerCompany(input: RegisterInput, now = new Date()): Promise<CompanyWithPlan> {
   const plan = await prisma.plan.findFirst({ where: { id: input.planId, active: true } });
@@ -31,7 +31,7 @@ export async function registerCompany(input: RegisterInput, now = new Date()): P
   const trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * DAY_MS);
   let gpswoxUserId: number;
   try {
-    gpswoxUserId = await createReseller({ email: input.email, password: input.password, devicesLimit: plan.devices, expiresAt: trialEndsAt, phone: input.phone });
+    gpswoxUserId = await createReseller({ email: input.email, password: input.password, devicesLimit: plan.devices, expiresAt: new Date(now.getTime() + RESELLER_OPEN_DAYS * DAY_MS), phone: input.phone });
   } catch (error) {
     const message = (error as Error).message;
     console.error("[registro] GPSWOX:", message);
@@ -50,7 +50,7 @@ export async function registerCompany(input: RegisterInput, now = new Date()): P
       planId: plan.id,
       trialEndsAt,
       gpswoxUserId,
-      gpswoxLimit: plan.devices,
+      deviceLimit: plan.devices,
     },
     include: { plan: true },
   });
@@ -60,7 +60,7 @@ export async function registerCompany(input: RegisterInput, now = new Date()): P
     title: `¡Hola ${company.contactName}! Tu plataforma está lista`,
     lines: [
       `Tienes ${TRIAL_DAYS} días gratis, hasta el ${formatDate(trialEndsAt)}, con hasta ${plan.devices} equipos GPS. No te pedimos tarjeta.`,
-      "Antes de que termine la prueba eliges y pagas tu paquete. Cada equipo cuenta su año desde el día en que lo agregas.",
+      "Al terminar la prueba, a fin de cada mes te enviamos la factura de los equipos que subiste. Pagas del 1 al 15. Cada equipo se renueva a su año.",
       `Entra a tu plataforma con tu correo y la contraseña que elegiste: ${resellerLoginUrl()}`,
     ],
     cta: { label: "Ver mi cuenta", url: `${appUrl()}/cuenta` },
@@ -99,197 +99,146 @@ export async function notifyOnce(company: Company, kind: string, dedupeKey: stri
 }
 
 
-// Devices whose year ends within the renewal window (or already ended), soonest first.
-export function dueSlots(slots: Slot[], now: Date): Slot[] {
-  const limit = now.getTime() + RENEWAL_WINDOW_DAYS * DAY_MS;
-  return slots
-    .filter((s) => s.deviceId !== null && s.endsAt && s.endsAt.getTime() <= limit)
-    .sort((a, b) => a.endsAt!.getTime() - b.endsAt!.getTime());
+// Mirrors the devices found in GPSWOX. A new device is first billed when the trial ends (or the month it is added after that).
+export async function syncDevices(company: Company, now = new Date()): Promise<void> {
+  if (!company.gpswoxUserId) return;
+  const found = await deviceList(company.gpswoxUserId);
+  const known = new Map((await prisma.billedDevice.findMany({ where: { companyId: company.id } })).map((d) => [d.deviceId, d]));
+  const present = new Set(found.map((d) => d.id));
+  for (const d of found) {
+    const row = known.get(d.id);
+    if (!row) {
+      const nextBillAt = d.createdAt > company.trialEndsAt ? d.createdAt : company.trialEndsAt;
+      await prisma.billedDevice.create({ data: { companyId: company.id, deviceId: d.id, addedAt: d.createdAt, nextBillAt } });
+    } else if (row.removedAt) {
+      await prisma.billedDevice.update({ where: { id: row.id }, data: { removedAt: null } });
+    }
+  }
+  for (const row of known.values()) {
+    if (!row.removedAt && !present.has(row.deviceId)) await prisma.billedDevice.update({ where: { id: row.id }, data: { removedAt: now } });
+  }
 }
 
-export type Purchase = {
-  kind: "plan" | "block" | "renewal";
-  planId?: string;
-  blocks?: number;
-  renewCount?: number;
-  amountCents: number;
-  currency: string;
-  method: string;
-  reference?: string;
-  note?: string;
-};
-
-export async function recordPurchase(companyId: string, p: Purchase, now = new Date()): Promise<CompanyWithPlan> {
-  if (p.reference && (await prisma.payment.findUnique({ where: { reference: p.reference } }))) {
-    return prisma.company.findUniqueOrThrow({ where: { id: companyId }, include: { plan: true } });
+export async function setDeviceLimit(company: Company, deviceLimit: number) {
+  if (company.gpswoxUserId) {
+    await updateReseller(company.gpswoxUserId, company.email, { devicesLimit: deviceLimit, expiresAt: new Date(Date.now() + RESELLER_OPEN_DAYS * DAY_MS), active: company.status !== "BLOCKED" });
   }
-  const company = await prisma.company.findUniqueOrThrow({ where: { id: companyId }, include: { plan: true, slots: true } });
-  let devices = 0;
-  let planId: string | null = null;
-  let renew: Slot[] = [];
-  if (p.kind === "plan") {
-    const plan = await prisma.plan.findFirst({ where: { id: p.planId, active: true } });
-    if (!plan) throw new PurchaseError("Ese paquete no está disponible.");
-    devices = plan.devices;
-    planId = plan.id;
-  } else if (p.kind === "block") {
-    if (!company.slots.length) throw new PurchaseError("Primero hay que comprar un paquete.");
-    const blocks = p.blocks ?? 0;
-    if (!Number.isInteger(blocks) || blocks < 1 || blocks > 100) throw new PurchaseError("Cantidad de bloques no válida.");
-    devices = blocks * ADDON_DEVICES;
-  } else {
-    const due = dueSlots(company.slots, now);
-    renew = due.slice(0, Math.min(p.renewCount || due.length, due.length));
-    if (!renew.length) throw new PurchaseError("No hay equipos para renovar.");
-    devices = renew.length;
-  }
+  await prisma.company.update({ where: { id: company.id }, data: { deviceLimit } });
+}
 
-  const payment = await prisma.$transaction(async (tx) => {
-    const created = await tx.payment.create({
-      data: { companyId, kind: p.kind, devices, planId, amountCents: p.amountCents, currency: p.currency, method: p.method, reference: p.reference, note: p.note },
+export async function createInvoice(company: Company, now = new Date()) {
+  const period = closedPeriod(now);
+  if (company.createdAt >= period.end) return null;
+  if (await prisma.invoice.findUnique({ where: { companyId_periodStart: { companyId: company.id, periodStart: period.start } } })) return null;
+  const devices = await prisma.billedDevice.findMany({ where: { companyId: company.id } });
+  const { items, newDevices, renewals } = devicesToBill(devices, period.end);
+  if (!items.length) return null;
+  const tiers = await prisma.priceTier.findMany();
+  const unit = unitPrice(tiers, devices.filter((d) => !d.removedAt).length);
+  if (unit <= 0) {
+    console.warn(`[factura] ${company.id}: no hay precio para este tramo; no se factura hasta que se configure.`);
+    return null;
+  }
+  const invoice = await prisma.$transaction(async (tx) => {
+    const created = await tx.invoice.create({
+      data: { companyId: company.id, periodStart: period.start, periodEnd: period.end, dueAt: period.dueAt, devices: items.length, newDevices, renewals, unitPriceCents: unit, amountCents: unit * items.length },
     });
-    if (p.kind === "renewal") {
-      for (const slot of renew) {
-        await tx.slot.update({ where: { id: slot.id }, data: { endsAt: renewedEnd(slot.endsAt!, now), expiredNotified: false } });
-      }
-    } else {
-      await tx.slot.createMany({ data: Array.from({ length: devices }, () => ({ companyId, paymentId: created.id })) });
-    }
-    await tx.company.update({
-      where: { id: companyId },
-      data: { status: "ACTIVE", ...(planId ? { planId } : {}), ...(company.status !== "ACTIVE" ? { gpswoxLimit: null } : {}) },
-    });
+    for (const d of items) await tx.billedDevice.update({ where: { id: d.id }, data: { nextBillAt: plusOneYear(d.nextBillAt) } });
     return created;
   });
+  await notifyOnce(company, "invoice", `${invoice.id}:invoice`, {
+    subject: `Tu factura de GPS Link: ${formatMoney(invoice.amountCents, invoice.currency)}`,
+    title: "Tu factura del mes está lista",
+    lines: [
+      `${invoice.devices} ${invoice.devices === 1 ? "equipo" : "equipos"} (${newDevices} nuevos, ${renewals} renovaciones) a ${formatMoney(unit, invoice.currency)} por año cada uno.`,
+      `Total: ${formatMoney(invoice.amountCents, invoice.currency)}. Puedes pagar hasta el ${formatDate(new Date(invoice.dueAt.getTime() - DAY_MS))}.`,
+    ],
+    cta: { label: "Pagar mi factura", url: `${appUrl()}/cuenta` },
+  });
+  return invoice;
+}
 
-  await syncCompany(companyId, now);
-  const updated = await prisma.company.findUniqueOrThrow({ where: { id: companyId }, include: { plan: true } });
-  await notifyOnce(updated, "paid", `${payment.id}:paid`, {
+export async function markInvoicePaid(invoiceId: string, payment: { method: string; reference?: string; note?: string }, now = new Date()) {
+  if (payment.reference && (await prisma.invoice.findUnique({ where: { reference: payment.reference } }))) return null;
+  const invoice = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { company: true } });
+  if (invoice.status === "PAID") return invoice;
+  const paid = await prisma.invoice.update({ where: { id: invoiceId }, data: { status: "PAID", paidAt: now, ...payment } });
+  const company = invoice.company;
+  if (company.status === "BLOCKED" && !(await prisma.invoice.count({ where: { companyId: company.id, status: "OPEN", dueAt: { lte: now } } }))) {
+    if (company.gpswoxUserId) await setResellerActive(company.email, true);
+    await prisma.company.update({ where: { id: company.id }, data: { status: "ACTIVE" } });
+  }
+  await notifyOnce(company, "paid", `${invoiceId}:paid`, {
     subject: "Pago recibido: GPS Link",
     title: "¡Gracias! Recibimos tu pago",
-    lines: [
-      `Monto: ${formatMoney(p.amountCents, p.currency)}.`,
-      p.kind === "renewal"
-        ? `Renovaste ${devices} ${devices === 1 ? "equipo" : "equipos"} por un año más.`
-        : `Tienes ${devices} equipos más. El año de cada uno empieza el día en que lo agregas (los que ya tenías empiezan hoy).`,
-    ],
+    lines: [`Factura de ${formatMoney(invoice.amountCents, invoice.currency)} pagada.`],
     cta: { label: "Ver mi cuenta", url: `${appUrl()}/cuenta` },
   });
-  return updated;
+  return paid;
 }
 
-// Assigns paid slots to the devices found in GPSWOX and pushes each device's expiration and the reseller's limit.
-export async function syncCompany(companyId: string, now = new Date()): Promise<void> {
-  const company = await prisma.company.findUniqueOrThrow({ where: { id: companyId }, include: { slots: true } });
-  if (company.status !== "ACTIVE" || !company.gpswoxUserId) return;
-  const devices = await deviceList(company.gpswoxUserId);
-  const { slots, changed } = assignSlots(company.slots, devices, now);
-  for (const s of changed) {
-    await prisma.slot.update({ where: { id: s.id }, data: { deviceId: s.deviceId, startsAt: s.startsAt, endsAt: s.endsAt } });
-  }
-  const synced = new Map((await prisma.deviceSync.findMany({ where: { companyId } })).map((d) => [d.deviceId, d.expiresAt.getTime()]));
-  for (const [deviceId, expiresAt] of deviceExpirations(slots, devices, company.trialEndsAt)) {
-    if (synced.get(deviceId) === expiresAt.getTime()) continue;
-    await setDeviceExpiration(deviceId, expiresAt);
-    await prisma.deviceSync.upsert({ where: { deviceId }, update: { companyId, expiresAt }, create: { deviceId, companyId, expiresAt } });
-  }
-  const limit = usableSlots(slots, now);
-  if (company.gpswoxLimit !== limit) {
-    await updateReseller(company.gpswoxUserId, company.email, { devicesLimit: limit, expiresAt: new Date(now.getTime() + RESELLER_OPEN_DAYS * DAY_MS), active: true });
-    await prisma.company.update({ where: { id: companyId }, data: { gpswoxLimit: limit } });
-  }
-}
-
-export async function blockCompany(company: Company, reason: "expired" | "manual") {
+export async function blockCompany(company: Company, reason: "unpaid" | "manual") {
   if (company.gpswoxUserId) await setResellerActive(company.email, false);
   await prisma.company.update({ where: { id: company.id }, data: { status: "BLOCKED" } });
-  if (reason === "expired") {
-    await notifyOnce(company, "blocked", `${company.id}:blocked:${company.trialEndsAt.toISOString().slice(0, 10)}`, {
-      subject: "Tu prueba gratis de GPS Link terminó",
+  if (reason === "unpaid") {
+    await notifyOnce(company, "blocked", `${company.id}:blocked:${new Date().toISOString().slice(0, 10)}`, {
+      subject: "Tu plataforma GPS Link fue bloqueada por falta de pago",
       title: "Tu plataforma está bloqueada",
-      lines: [
-        "Tu prueba gratis terminó y todavía no elegiste tu paquete.",
-        "Tus clientes y equipos siguen guardados. Paga tu paquete y se reactiva al momento.",
-      ],
-      cta: { label: "Elegir mi paquete", url: `${appUrl()}/cuenta` },
+      lines: ["Tu factura venció el día 15 y no recibimos el pago.", "Tus clientes y equipos siguen guardados. Paga tu factura y se reactiva al momento."],
+      cta: { label: "Pagar y reactivar", url: `${appUrl()}/cuenta` },
     });
   }
 }
 
-export async function unblockCompany(company: CompanyWithPlan, now = new Date()): Promise<boolean> {
-  const hasSlots = (await prisma.slot.count({ where: { companyId: company.id } })) > 0;
-  if (hasSlots) {
-    await prisma.company.update({ where: { id: company.id }, data: { status: "ACTIVE", gpswoxLimit: null } });
-    await syncCompany(company.id, now);
-    return true;
-  }
-  if (company.trialEndsAt <= now) return false;
+export async function unblockCompany(company: Company, now = new Date()): Promise<boolean> {
+  if (await prisma.invoice.count({ where: { companyId: company.id, status: "OPEN", dueAt: { lte: now } } })) return false;
   if (company.gpswoxUserId) await setResellerActive(company.email, true);
-  await prisma.company.update({ where: { id: company.id }, data: { status: "TRIAL" } });
+  await prisma.company.update({ where: { id: company.id }, data: { status: company.trialEndsAt > now ? "TRIAL" : "ACTIVE" } });
   return true;
 }
 
 const dayKey = (d: Date) => d.toISOString().slice(0, 10);
 
 export async function runDailyLifecycle(now = new Date()) {
-  const summary = { reminders: 0, blocked: 0, synced: 0, expired: 0, errors: 0 };
-
-  for (const company of await prisma.company.findMany({ where: { status: "TRIAL" }, include: { plan: true } })) {
+  const summary = { reminders: 0, blocked: 0, invoices: 0, errors: 0 };
+  for (const company of await prisma.company.findMany({ where: { status: { in: ["TRIAL", "ACTIVE", "BLOCKED"] } } })) {
     try {
-      if (shouldBlock(company, now)) {
-        await blockCompany(company, "expired");
-        summary.blocked++;
-        continue;
+      await syncDevices(company, now);
+      if (company.status === "TRIAL") {
+        if (now >= company.trialEndsAt) await prisma.company.update({ where: { id: company.id }, data: { status: "ACTIVE" } });
+        const days = reminderDayFor(company.trialEndsAt, now);
+        if (days && company.trialEndsAt > now) {
+          const sent = await notifyOnce(company, `reminder_${days}`, `${company.id}:${dayKey(company.trialEndsAt)}:reminder_${days}`, {
+            subject: `Tu prueba gratis de GPS Link termina en ${days} ${days === 1 ? "día" : "días"}`,
+            title: `Te ${days === 1 ? "queda 1 día" : `quedan ${days} días`} de prueba`,
+            lines: [`Tu prueba termina el ${formatDate(company.trialEndsAt)}. Desde ahí, a fin de mes te llega la factura de tus equipos y pagas del 1 al 15.`],
+            cta: { label: "Ver mi cuenta", url: `${appUrl()}/cuenta` },
+          });
+          if (sent) summary.reminders++;
+        }
       }
-      const days = trialReminderDue(company, now);
-      if (days) {
-        const sent = await notifyOnce(company, `reminder_${days}`, `${company.id}:${dayKey(company.trialEndsAt)}:reminder_${days}`, {
-          subject: `Tu prueba gratis de GPS Link termina en ${days} ${days === 1 ? "día" : "días"}`,
-          title: `Te ${days === 1 ? "queda 1 día" : `quedan ${days} días`} de prueba`,
-          lines: [
-            `Tu prueba gratis termina el ${formatDate(company.trialEndsAt)}.`,
-            "Elige y paga tu paquete (desde 20 equipos) para que tu plataforma y tus clientes no se bloqueen.",
-          ],
-          cta: { label: "Elegir mi paquete", url: `${appUrl()}/cuenta` },
+      if (await createInvoice(company, now)) summary.invoices++;
+      for (const inv of await prisma.invoice.findMany({ where: { companyId: company.id, status: "OPEN" } })) {
+        if (inv.dueAt <= now) {
+          if (company.status !== "BLOCKED") {
+            await blockCompany(company, "unpaid");
+            summary.blocked++;
+          }
+          continue;
+        }
+        const days = reminderDayFor(inv.dueAt, now);
+        if (!days) continue;
+        const sent = await notifyOnce(company, `due_${days}`, `${inv.id}:due_${days}`, {
+          subject: `Tu factura de GPS Link vence en ${days} ${days === 1 ? "día" : "días"}`,
+          title: `Paga tu factura de ${formatMoney(inv.amountCents, inv.currency)}`,
+          lines: [`Si no se paga antes del día 16, tu plataforma se bloquea.`],
+          cta: { label: "Pagar mi factura", url: `${appUrl()}/cuenta` },
         });
         if (sent) summary.reminders++;
       }
     } catch (error) {
       summary.errors++;
       console.error(`[lifecycle] ${company.id}:`, (error as Error).message);
-    }
-  }
-
-  for (const { id } of await prisma.company.findMany({ where: { status: "ACTIVE" }, select: { id: true } })) {
-    try {
-      await syncCompany(id, now);
-      summary.synced++;
-      const company = await prisma.company.findUniqueOrThrow({ where: { id }, include: { slots: { where: { deviceId: { not: null } } } } });
-      for (const days of [3, 2, 1]) {
-        const count = company.slots.filter((s) => s.endsAt && reminderDayFor(s.endsAt, now) === days).length;
-        if (!count) continue;
-        const sent = await notifyOnce(company, `devices_due_${days}`, `${id}:devices_due_${days}:${dayKey(now)}`, {
-          subject: `${count} ${count === 1 ? "equipo vence" : "equipos vencen"} en ${days} ${days === 1 ? "día" : "días"}`,
-          title: `${count} ${count === 1 ? "equipo vence" : "equipos vencen"} en ${days} ${days === 1 ? "día" : "días"}`,
-          lines: ["Renuévalos por un año para que no se desactiven."],
-          cta: { label: "Renovar equipos", url: `${appUrl()}/cuenta` },
-        });
-        if (sent) summary.reminders++;
-      }
-      const expired = company.slots.filter((s) => s.endsAt && s.endsAt <= now && !s.expiredNotified);
-      if (expired.length) {
-        await notifyOnce(company, "devices_expired", `${id}:devices_expired:${dayKey(now)}`, {
-          subject: `${expired.length} ${expired.length === 1 ? "equipo se desactivó" : "equipos se desactivaron"} por vencimiento`,
-          title: `${expired.length} ${expired.length === 1 ? "equipo vencido" : "equipos vencidos"}`,
-          lines: ["Su año terminó y no se renovaron. Renuévalos y se activan al momento."],
-          cta: { label: "Renovar equipos", url: `${appUrl()}/cuenta` },
-        });
-        await prisma.slot.updateMany({ where: { id: { in: expired.map((s) => s.id) } }, data: { expiredNotified: true } });
-        summary.expired += expired.length;
-      }
-    } catch (error) {
-      summary.errors++;
-      console.error(`[lifecycle] ${id}:`, (error as Error).message);
     }
   }
   return summary;

@@ -1,10 +1,9 @@
 import { prisma } from "@/lib/db";
 import { applyCheckoutSession } from "@/lib/checkout";
-import { ADDON_DEVICES, BRAND, RENEWAL_WINDOW_DAYS } from "@/lib/config";
-import { dueSlots } from "@/lib/companies";
-import { CATEGORY_LABELS, METHOD_LABELS, STATUS_LABELS, formatDate, formatMoney, paymentLabel } from "@/lib/format";
+import { BRAND } from "@/lib/config";
+import { METHOD_LABELS, STATUS_LABELS, formatDate, formatMoney } from "@/lib/format";
 import { resellerLoginUrl } from "@/lib/gpswox";
-import { daysUntil, slotIsActive, slotIsFree } from "@/lib/lifecycle";
+import { daysUntil } from "@/lib/lifecycle";
 import { getSession } from "@/lib/session";
 import { getStripe } from "@/lib/stripe";
 import { SiteNav } from "../site-nav";
@@ -42,24 +41,17 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
     }
   }
 
-  const company = await prisma.company.findUnique({
-    where: { id: companyId },
-    include: { plan: true, payments: { orderBy: { createdAt: "desc" } }, slots: { orderBy: [{ endsAt: "asc" }, { createdAt: "asc" }] } },
-  });
+  const company = await prisma.company.findUnique({ where: { id: companyId }, include: { invoices: { orderBy: { periodStart: "desc" } } } });
   if (!company) return <LoginForm />;
   const now = new Date();
-  const [plans, prices] = await Promise.all([
-    prisma.plan.findMany({ where: { active: true, category: company.plan.category, priceCents: { gt: 0 } }, orderBy: { devices: "asc" } }),
-    prisma.categoryPrice.findUnique({ where: { category: company.plan.category } }),
+  const [activeDevices, tiers] = await Promise.all([
+    prisma.billedDevice.count({ where: { companyId: company.id, removedAt: null } }),
+    prisma.priceTier.findMany({ orderBy: { minDevices: "asc" } }),
   ]);
   const stripeOn = !!process.env.STRIPE_SECRET_KEY;
   const trialLeft = daysUntil(company.trialEndsAt, now);
-  const used = company.slots.filter((s) => slotIsActive(s, now));
-  const free = company.slots.filter((s) => slotIsFree(s, now));
-  const devices = company.slots.filter((s) => s.deviceId !== null);
-  const due = dueSlots(company.slots, now);
-  const hasSlots = company.slots.length > 0;
-  const contact = `escríbenos a ${BRAND.supportEmail}${BRAND.supportWhatsApp ? ` o al WhatsApp ${BRAND.supportWhatsApp}` : ""}`;
+  const open = company.invoices.filter((i) => i.status === "OPEN");
+  const contact = `escríbenos a ${BRAND.supportEmail}${BRAND.supportWhatsApp ? ` o al WhatsApp +${BRAND.supportWhatsApp}` : ""}`;
 
   return (
     <>
@@ -73,90 +65,49 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
           {params.bienvenido && <div className="ok">¡Listo! Tu plataforma de rastreo ya está creada. Te enviamos los datos por correo y WhatsApp.</div>}
           {paymentNotice && <div className="ok">{paymentNotice}</div>}
           {params.pago === "cancelado" && <div className="warn">El pago se canceló. Puedes intentarlo de nuevo cuando quieras.</div>}
-          {params.pago === "no-disponible" && <div className="warn">El pago en línea todavía no está disponible para esto. Para pagar, {contact}.</div>}
-          {company.status === "BLOCKED" && <div className="err">Tu plataforma está bloqueada. Paga tu paquete para reactivarla al momento.</div>}
-          {company.status === "TRIAL" && trialLeft <= 3 && trialLeft > 0 && <div className="warn">Te {trialLeft === 1 ? "queda 1 día" : `quedan ${trialLeft} días`} de prueba. Elige tu paquete para no ser bloqueado.</div>}
-          {due.length > 0 && <div className="warn">{due.length} {due.length === 1 ? "equipo vence" : "equipos vencen"} en los próximos {RENEWAL_WINDOW_DAYS} días o ya vencieron.</div>}
+          {params.pago === "no-disponible" && <div className="warn">El pago en línea no está disponible. Para pagar, {contact}.</div>}
+          {company.status === "BLOCKED" && <div className="err">Tu plataforma está bloqueada por una factura vencida. Págala y se reactiva al momento.</div>}
+          {open.length > 0 && company.status !== "BLOCKED" && <div className="warn">Tienes {open.length === 1 ? "una factura pendiente" : `${open.length} facturas pendientes`}. Paga antes del día 16 para que no se bloquee tu plataforma.</div>}
         </div>
 
         <div className="panel">
           <dl className="kv">
             <dt>Estado</dt><dd><span className={`tag ${company.status}`}>{STATUS_LABELS[company.status]}</span></dd>
-            {hasSlots ? (
-              <>
-                <dt>Equipos pagados</dt><dd>{used.length + free.length} ({used.length} en uso · {free.length} libres)</dd>
-                <dt>Por renovar</dt><dd>{due.length} en los próximos {RENEWAL_WINDOW_DAYS} días</dd>
-              </>
-            ) : (
-              <>
-                <dt>Prueba gratis hasta</dt><dd>{formatDate(company.trialEndsAt)}</dd>
-                <dt>Equipos en la prueba</dt><dd>Hasta {company.plan.devices} ({CATEGORY_LABELS[company.plan.category]})</dd>
-              </>
-            )}
+            <dt>Prueba gratis</dt><dd>{company.status === "TRIAL" ? `Hasta el ${formatDate(company.trialEndsAt)} (${trialLeft} días)` : `Terminó el ${formatDate(company.trialEndsAt)}`}</dd>
+            <dt>Equipos</dt><dd>{activeDevices} de {company.deviceLimit} disponibles<div className="hint">Para subir más, pídenos aumentar tu límite.</div></dd>
+            <dt>Cómo se cobra</dt><dd>A fin de cada mes te llega la factura de los equipos que subiste y de los que cumplen su año. Pagas del 1 al 15.</dd>
+            <dt>Precio por equipo al año</dt><dd>{tiers.filter((t) => t.priceCents > 0).map((t, i, arr) => <div key={t.id}>{formatMoney(t.priceCents, t.currency)} ({t.minDevices}{arr[i + 1] ? ` a ${arr[i + 1].minDevices - 1}` : " o más"} equipos)</div>)}{!tiers.some((t) => t.priceCents > 0) && "Por definir"}</dd>
             <dt>Código de empresa</dt><dd><b>{company.slug}</b></dd>
             <dt>Tu plataforma</dt><dd><a href={resellerLoginUrl()} target="_blank" rel="noreferrer" style={{ color: "var(--p)", fontWeight: 700 }}>{resellerLoginUrl()}</a><div className="hint">Entra con tu correo ({company.email}) y tu contraseña. Ahí pones tu logo y colores, y creas tus clientes.</div></dd>
           </dl>
         </div>
 
         <div className="panel" style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 6 }}>{hasSlots ? "Comprar más equipos" : "Elige tu paquete"}</h2>
-          <p className="hint" style={{ marginBottom: 12 }}>Cada equipo cuenta su año desde el día en que lo agregas. Los equipos que ya tienes empiezan el día del pago.</p>
-          {stripeOn && plans.length > 0 ? (
-            <form action={payAction} className="row">
-              <input type="hidden" name="kind" value="plan" />
-              <select name="planId" style={{ width: "auto" }} defaultValue={plans.find((p) => p.devices >= company.plan.devices)?.id ?? plans[0].id}>
-                {plans.map((p) => <option key={p.id} value={p.id}>{p.devices} equipos · {formatMoney(p.priceCents, p.currency)}</option>)}
-              </select>
-              <button className="btn sm">Pagar paquete</button>
-            </form>
+          <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 10 }}>Facturas</h2>
+          {company.invoices.length === 0 ? (
+            <p className="hint">Todavía no tienes facturas.</p>
           ) : (
-            <p className="hint">Para pagar tu paquete, {contact}. Lo activamos en cuanto confirmemos el pago.</p>
-          )}
-          {hasSlots && company.status !== "BLOCKED" && stripeOn && !!prices?.blockPriceCents && (
-            <form action={payAction} className="row" style={{ marginTop: 12 }}>
-              <input type="hidden" name="kind" value="block" />
-              <select name="blocks" style={{ width: "auto" }}>
-                {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n * ADDON_DEVICES} equipos extra · {formatMoney(prices.blockPriceCents * n, prices.currency)}</option>)}
-              </select>
-              <button className="btn sm s">Comprar equipos extra</button>
-            </form>
-          )}
-          {due.length > 0 && stripeOn && !!prices?.renewalPriceCents && (
-            <form action={payAction} style={{ marginTop: 12 }}>
-              <input type="hidden" name="kind" value="renewal" />
-              <button className="btn sm">Renovar {due.length} {due.length === 1 ? "equipo" : "equipos"} · {formatMoney(prices.renewalPriceCents * due.length, prices.currency)}</button>
-            </form>
-          )}
-        </div>
-
-        {devices.length > 0 && (
-          <div className="panel" style={{ marginTop: 18 }}>
-            <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 10 }}>Tus equipos</h2>
             <table className="t">
-              <thead><tr><th>Equipo</th><th>Empezó</th><th>Vence</th><th>Estado</th></tr></thead>
+              <thead><tr><th>Mes</th><th>Equipos</th><th>Total</th><th>Vence</th><th>Estado</th></tr></thead>
               <tbody>
-                {devices.map((s) => {
-                  const left = s.endsAt ? daysUntil(s.endsAt, now) : 0;
-                  return <tr key={s.id}><td>#{s.deviceId}</td><td>{formatDate(s.startsAt)}</td><td>{formatDate(s.endsAt)}</td><td>{left <= 0 ? "Vencido" : left <= RENEWAL_WINDOW_DAYS ? `Vence en ${left} días` : "Activo"}</td></tr>;
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {company.payments.length > 0 && (
-          <div className="panel" style={{ marginTop: 18 }}>
-            <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 10 }}>Pagos</h2>
-            <table className="t">
-              <thead><tr><th>Fecha</th><th>Concepto</th><th>Monto</th><th>Método</th></tr></thead>
-              <tbody>
-                {company.payments.map((p) => (
-                  <tr key={p.id}><td>{formatDate(p.createdAt)}</td><td>{paymentLabel(p)}</td><td>{formatMoney(p.amountCents, p.currency)}</td><td>{METHOD_LABELS[p.method] ?? p.method}</td></tr>
+                {company.invoices.map((i) => (
+                  <tr key={i.id}>
+                    <td>{formatDate(i.periodStart)}</td>
+                    <td>{i.devices} ({i.newDevices} nuevos · {i.renewals} renovaciones)</td>
+                    <td>{formatMoney(i.amountCents, i.currency)}</td>
+                    <td>{formatDate(new Date(i.dueAt.getTime() - 86_400_000))}</td>
+                    <td>
+                      {i.status === "PAID" ? `Pagada (${METHOD_LABELS[i.method ?? ""] ?? i.method})` : stripeOn ? (
+                        <form action={payAction}><input type="hidden" name="invoiceId" value={i.id} /><button className="btn sm">Pagar</button></form>
+                      ) : "Pendiente"}
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>
-          </div>
-        )}
+          )}
+          {!stripeOn && open.length > 0 && <p className="hint" style={{ marginTop: 10 }}>Para pagar, {contact}.</p>}
+        </div>
       </div>
     </>
   );

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { TRIAL_DAYS } from "@/lib/config";
-import { CATEGORY_LABELS, formatMoney } from "@/lib/format";
+
 import { ensureDefaultPlans } from "@/lib/plans";
 import { SiteNav } from "../site-nav";
 import { RegisterForm } from "./register-form";
@@ -13,7 +13,7 @@ export default async function RegistroPage({ searchParams }: { searchParams: Pro
   const plans = await prisma.plan.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { devices: "asc" }] });
   const options = plans.map((p) => ({
     id: p.id,
-    label: `${CATEGORY_LABELS[p.category]} · ${p.devices} equipos${p.priceCents > 0 ? ` · ${formatMoney(p.priceCents, p.currency)}/año` : ""}`,
+    label: `Hasta ${p.devices} equipos`,
   }));
   const selected = plans.find((p) => p.id === plan)?.id ?? plans.find((p) => p.highlighted)?.id ?? plans[0]?.id ?? "";
 
