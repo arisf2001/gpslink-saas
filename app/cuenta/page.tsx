@@ -75,12 +75,21 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
         <div className="panel">
           <dl className="kv">
             <dt>Estado</dt><dd><span className={`tag ${company.status}`}>{STATUS_LABELS[company.status]}</span></dd>
-            <dt>Prueba gratis</dt><dd>{company.status === "TRIAL" ? `Hasta el ${formatDate(company.trialEndsAt)} (${trialLeft} días)` : `Terminó el ${formatDate(company.trialEndsAt)}`}</dd>
-            <dt>Equipos</dt><dd>{activeDevices} de {company.deviceLimit} disponibles<div className="hint">Para subir más, pídenos aumentar tu límite.</div></dd>
-            <dt>Cómo se cobra</dt><dd>A fin de cada mes te llega la factura de los equipos que subiste y de los que cumplen su año. Pagas del 1 al 15.</dd>
-            <dt>Precio por equipo al año</dt><dd>{tiers.filter((t) => t.priceCents > 0).map((t, i, arr) => <div key={t.id}>{formatMoney(t.priceCents, t.currency)} ({t.minDevices}{arr[i + 1] ? ` a ${arr[i + 1].minDevices - 1}` : " o más"} equipos)</div>)}{!tiers.some((t) => t.priceCents > 0) && "Por definir"}</dd>
+            {company.billingEnabled ? (
+              <>
+                <dt>Prueba gratis</dt><dd>{company.status === "TRIAL" ? `Hasta el ${formatDate(company.trialEndsAt)} (${trialLeft} días)` : `Terminó el ${formatDate(company.trialEndsAt)}`}</dd>
+                <dt>Equipos</dt><dd>{activeDevices} de {company.deviceLimit} disponibles<div className="hint">Para subir más, pídenos aumentar tu límite.</div></dd>
+                <dt>Cómo se cobra</dt><dd>A fin de cada mes te llega la factura de los equipos que subiste y de los que cumplen su año. Pagas del 1 al 15.</dd>
+                <dt>Precio por equipo al año</dt><dd>{tiers.filter((t) => t.priceCents > 0).map((t, i, arr) => <div key={t.id}>{formatMoney(t.priceCents, t.currency)} ({t.minDevices}{arr[i + 1] ? ` a ${arr[i + 1].minDevices - 1}` : " o más"} equipos)</div>)}{!tiers.some((t) => t.priceCents > 0) && "Por definir"}</dd>
+              </>
+            ) : (
+              <>
+                <dt>Equipos</dt><dd>{activeDevices}</dd>
+                <dt>Cobro</dt><dd>Tu cuenta sigue con las mismas condiciones que tenías con GPS Link.</dd>
+              </>
+            )}
             <dt>Código de empresa</dt><dd><b>{company.slug}</b></dd>
-            <dt>Tu plataforma</dt><dd><a href={resellerLoginUrl()} target="_blank" rel="noreferrer" style={{ color: "var(--p)", fontWeight: 700 }}>{resellerLoginUrl()}</a><div className="hint">Entra con tu correo ({company.email}) y tu contraseña. Ahí pones tu logo y colores, y creas tus clientes.</div></dd>
+            <dt>Tu plataforma</dt><dd><a href={resellerLoginUrl()} target="_blank" rel="noreferrer" style={{ color: "var(--p)", fontWeight: 700 }}>{resellerLoginUrl()}</a><div className="hint">Entra con tu correo ({company.email}) y tu contraseña{company.billingEnabled ? "" : " de la plataforma"}. Ahí pones tu logo y colores, y creas tus clientes.</div></dd>
           </dl>
         </div>
 

@@ -88,6 +88,20 @@ export async function unblockAction(formData: FormData) {
   redirect(`/admin/empresa/${company.id}?ok=desbloqueada`);
 }
 
+export async function setBillingAction(formData: FormData) {
+  await requireAdmin();
+  const company = await prisma.company.findUniqueOrThrow({ where: { id: String(formData.get("companyId")) } });
+  const on = formData.get("on") === "1";
+  if (on && !company.billingEnabled) {
+    const now = new Date();
+    await prisma.billedDevice.updateMany({ where: { companyId: company.id, nextBillAt: { lt: now } }, data: { nextBillAt: now } });
+    await prisma.company.update({ where: { id: company.id }, data: { billingEnabled: true, trialEndsAt: now, ...(company.status === "BLOCKED" ? {} : { status: "ACTIVE" }) } });
+  } else if (!on) {
+    await prisma.company.update({ where: { id: company.id }, data: { billingEnabled: false } });
+  }
+  redirect(`/admin/empresa/${company.id}?ok=${on ? "cobro-on" : "cobro-off"}`);
+}
+
 export async function extendAction(formData: FormData) {
   await requireAdmin();
   const company = await prisma.company.findUniqueOrThrow({ where: { id: String(formData.get("companyId")) } });

@@ -1,10 +1,12 @@
+import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { Company, Plan } from "@prisma/client";
 import { prisma } from "./db";
 import { DAY_MS, RESELLER_OPEN_DAYS, TRIAL_DAYS, appUrl } from "./config";
 import { closedPeriod, devicesToBill, unitPrice } from "./billing";
 import { formatDate, formatMoney } from "./format";
-import { createReseller, deviceList, resellerLoginUrl, setResellerActive, updateReseller } from "./gpswox";
+import { brandChain, createReseller, deviceList, resellerLoginUrl, setResellerActive, updateReseller, userIdByEmail } from "./gpswox";
+import { login as platformLogin, userInfo } from "./ai/gps";
 import { runClientLifecycle } from "./clients";
 import { plusOneYear, reminderDayFor } from "./lifecycle";
 import { emailHtml, sendEmail, sendWhatsApp, type ChannelResult } from "./notify";
@@ -73,6 +75,42 @@ export async function verifyCompanyLogin(email: string, password: string): Promi
   const company = await prisma.company.findUnique({ where: { email } });
   if (!company) return null;
   return (await bcrypt.compare(password, company.passwordHash)) ? company : null;
+}
+
+// White labels created by hand in GPSWOX (before the signup page) log in with their platform credentials.
+// The first time, their account is created linked to their GPSWOX user, with billing off until the owner turns it on.
+export async function verifyResellerLogin(email: string, password: string): Promise<Company | "not_reseller" | null> {
+  const hash = await platformLogin(email, password).catch(() => null);
+  if (!hash) return null;
+  const info = await userInfo(hash).catch(() => null);
+  const userId = info ? await userIdByEmail(info.email) : null;
+  if (!info || !userId) return null;
+  const linked = (await prisma.company.findFirst({ where: { gpswoxUserId: userId } })) ?? (await prisma.company.findUnique({ where: { email: info.email } }));
+  if (linked) return linked.gpswoxUserId === userId ? linked : null;
+  if (!(await brandChain(userId))[0]?.reseller) return "not_reseller";
+  const plan = await prisma.plan.findFirst({ where: { active: true }, orderBy: { devices: "asc" } });
+  if (!plan) return null;
+  const base = info.email.split("@")[0].toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30) || "marca";
+  let slug = base;
+  for (let i = 2; await prisma.company.findUnique({ where: { slug } }); i++) slug = `${base}-${i}`;
+  const now = new Date();
+  const company = await prisma.company.create({
+    data: {
+      name: base,
+      slug,
+      contactName: base,
+      email: info.email,
+      phone: "",
+      passwordHash: await bcrypt.hash(randomBytes(24).toString("hex"), 10),
+      planId: plan.id,
+      status: "ACTIVE",
+      trialEndsAt: now,
+      gpswoxUserId: userId,
+      billingEnabled: false,
+    },
+  });
+  await syncDevices(company, now).catch((error) => console.error("[cuenta] equipos:", (error as Error).message));
+  return company;
 }
 
 type Message = { subject: string; title: string; lines: string[]; cta?: { label: string; url: string } };
@@ -215,6 +253,7 @@ export async function runDailyLifecycle(now = new Date()) {
         summary.errors++;
         console.error(`[clientes] ${company.id}:`, (error as Error).message);
       }
+      if (!company.billingEnabled) continue;
       if (company.status === "TRIAL") {
         if (now >= company.trialEndsAt) await prisma.company.update({ where: { id: company.id }, data: { status: "ACTIVE" } });
         const days = reminderDayFor(company.trialEndsAt, now);

@@ -1,9 +1,11 @@
 "use server";
 
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { rateLimit } from "@/lib/ai/assistant";
 import { prisma } from "@/lib/db";
 import { appUrl } from "@/lib/config";
-import { verifyCompanyLogin } from "@/lib/companies";
+import { verifyCompanyLogin, verifyResellerLogin } from "@/lib/companies";
 import { clearSession, getSession, setSession } from "@/lib/session";
 import { getStripe } from "@/lib/stripe";
 
@@ -12,7 +14,14 @@ export type LoginState = { error?: string };
 export async function loginAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
-  const company = await verifyCompanyLogin(email, password);
+  if (!email || !password) return { error: "Escribe tu correo y tu contraseña." };
+  const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
+  if (rateLimit(`cuenta-login:${ip}`, 10) > 0 || rateLimit(`cuenta-login:${email}`, 5) > 0) return { error: "Demasiados intentos. Espera un minuto." };
+  const company = (await verifyCompanyLogin(email, password)) ?? (await verifyResellerLogin(email, password).catch((error) => {
+    console.error("[cuenta] login GPS Link:", (error as Error).message);
+    return null;
+  }));
+  if (company === "not_reseller") return { error: "Esta entrada es para marcas blancas. Para tu plataforma de rastreo usa \"Entrar a la plataforma\", arriba." };
   if (!company) return { error: "Correo o contraseña incorrectos." };
   await setSession("company", company.id);
   redirect("/cuenta");

@@ -44,7 +44,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
               <td>{c.contactName}<div className="hint">{c.email} · {c.phone}</div></td>
               <td>{c.devices.length} de {c.deviceLimit}</td>
               <td><span className={`tag ${c.status}`}>{STATUS_LABELS[c.status]}</span></td>
-              <td>{c.status === "TRIAL" ? `Hasta ${formatDate(c.trialEndsAt)} (${daysUntil(c.trialEndsAt, now)} días)` : `Terminó ${formatDate(c.trialEndsAt)}`}</td>
+              <td>{!c.billingEnabled ? "Sin cobro (ya estaba en GPS Link)" : c.status === "TRIAL" ? `Hasta ${formatDate(c.trialEndsAt)} (${daysUntil(c.trialEndsAt, now)} días)` : `Terminó ${formatDate(c.trialEndsAt)}`}</td>
               <td>{c.invoices.length ? formatMoney(c.invoices.reduce((t, i) => t + i.amountCents, 0)) : "—"}</td>
               <td><Link href={`/admin/empresa/${c.id}`} className="btn sm s">Ver</Link></td>
             </tr>

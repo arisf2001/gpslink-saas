@@ -59,6 +59,7 @@ model Company {
   trialEndsAt          DateTime
   gpswoxUserId         Int?
   deviceLimit          Int            @default(50)
+  billingEnabled       Boolean        @default(true)
   provisionError       String?        @db.Text
   stripeCustomerId     String?
   createdAt            DateTime       @default(now())

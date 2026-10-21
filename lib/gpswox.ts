@@ -274,7 +274,11 @@ export async function userIdByEmail(email: string): Promise<number | null> {
 
 // The user and its managers up to the root, nearest first; reseller = GPSWOX group 3 (white label / dealer).
 export async function brandChain(userId: number): Promise<{ id: number; reseller: boolean }[]> {
-  if (isMock()) return (await ancestors(userId)).map((id) => ({ id, reseller: false }));
+  if (isMock()) {
+    const ids = await ancestors(userId);
+    const rows = await prisma.mockClient.findMany({ where: { id: { in: ids } }, select: { id: true, groupId: true } });
+    return ids.map((id) => ({ id, reseller: rows.some((r) => r.id === id && r.groupId === 3) }));
+  }
   return withGpswoxDb(async (conn) => {
     const chain: { id: number; reseller: boolean }[] = [];
     let id: number | null = userId;

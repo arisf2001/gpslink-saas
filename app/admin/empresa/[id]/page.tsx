@@ -4,12 +4,12 @@ import { METHOD_LABELS, NOTIFICATION_LABELS, STATUS_LABELS, formatDate, formatMo
 import { DAY_MS } from "@/lib/config";
 import { daysUntil } from "@/lib/lifecycle";
 import { getSession } from "@/lib/session";
-import { blockAction, extendAction, markInvoicePaidAction, mockDeviceAction, setLimitAction, unblockAction } from "../../actions";
+import { blockAction, extendAction, markInvoicePaidAction, mockDeviceAction, setBillingAction, setLimitAction, unblockAction } from "../../actions";
 import { AdminShell } from "../../admin-shell";
 
 export const dynamic = "force-dynamic";
 
-const OK: Record<string, string> = { pago: "Pago registrado.", bloqueada: "Empresa bloqueada.", desbloqueada: "Empresa desbloqueada.", extendida: "Prueba extendida.", limite: "Límite de equipos cambiado.", equipo: "Equipos de prueba agregados (modo prueba)." };
+const OK: Record<string, string> = { pago: "Pago registrado.", bloqueada: "Empresa bloqueada.", desbloqueada: "Empresa desbloqueada.", extendida: "Prueba extendida.", limite: "Límite de equipos cambiado.", equipo: "Equipos de prueba agregados (modo prueba).", "cobro-on": "Cobro activado.", "cobro-off": "Cobro desactivado." };
 const ERR: Record<string, string> = { dias: "Días no válidos (1 a 400).", limite: "Límite no válido.", vencida: "Tiene facturas vencidas sin pagar: registra el pago primero." };
 
 export default async function EmpresaPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ ok?: string; error?: string; msg?: string }> }) {
@@ -41,7 +41,8 @@ export default async function EmpresaPage({ params, searchParams }: { params: Pr
           <dt>Contacto</dt><dd>{company.contactName} · {company.email} · {company.phone}</dd>
           <dt>Código</dt><dd>{company.slug}</dd>
           <dt>Registrada</dt><dd>{formatDate(company.createdAt)}</dd>
-          <dt>Prueba gratis</dt><dd>Hasta {formatDate(company.trialEndsAt)}{company.status === "TRIAL" && ` (${daysUntil(company.trialEndsAt, now)} días)`}</dd>
+          <dt>Prueba gratis</dt><dd>{company.billingEnabled ? <>Hasta {formatDate(company.trialEndsAt)}{company.status === "TRIAL" && ` (${daysUntil(company.trialEndsAt, now)} días)`}</> : "—"}</dd>
+          <dt>Cobro</dt><dd>{company.billingEnabled ? "Activo: factura a fin de mes" : "Desactivado: ya estaba en GPS Link y entró con su usuario de la plataforma"}</dd>
           <dt>Equipos</dt><dd>{active.length} de {company.deviceLimit} permitidos</dd>
           <dt>Usuario en GPS Link</dt><dd>{company.gpswoxUserId ? `#${company.gpswoxUserId}` : "—"}</dd>
           {company.provisionError && <><dt>Error GPS Link</dt><dd className="hint">{company.provisionError}</dd></>}
@@ -49,12 +50,19 @@ export default async function EmpresaPage({ params, searchParams }: { params: Pr
       </div>
 
       <div className="grid" style={{ marginTop: 18 }}>
-        <form action={setLimitAction} className="panel form">
+        <form action={setBillingAction} className="panel form">
+          <b>Cobro de GPS Link</b>
+          <input type="hidden" name="companyId" value={company.id} />
+          <input type="hidden" name="on" value={company.billingEnabled ? "0" : "1"} />
+          <p className="hint">{company.billingEnabled ? "Si lo desactivas, no se le crean facturas ni se bloquea por falta de pago." : "Al activarlo, sus equipos actuales entran en la factura de fin de este mes, y la IA también si la tiene activa."}</p>
+          <button className={`btn sm${company.billingEnabled ? " s" : ""}`}>{company.billingEnabled ? "Desactivar cobro" : "Activar cobro"}</button>
+        </form>
+        {company.billingEnabled && <form action={setLimitAction} className="panel form">
           <b>Límite de equipos</b>
           <input type="hidden" name="companyId" value={company.id} />
           <label>Máximo de equipos<input name="limit" type="number" min={1} defaultValue={company.deviceLimit} /></label>
           <button className="btn sm">Guardar límite</button>
-        </form>
+        </form>}
         {company.status === "TRIAL" && (
           <form action={extendAction} className="panel form">
             <b>Extender prueba</b>
