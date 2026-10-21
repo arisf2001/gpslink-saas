@@ -17,5 +17,5 @@ export function trackerUrl(): string {
 export const BRAND = {
   name: "GPS Link",
   supportEmail: process.env.SUPPORT_EMAIL ?? "info@gpslinkusa.com",
-  supportWhatsApp: process.env.SUPPORT_WHATSAPP ?? "",
+  supportWhatsApp: process.env.SUPPORT_WHATSAPP || "13059272739",
 };
