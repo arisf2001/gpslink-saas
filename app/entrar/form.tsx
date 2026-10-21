@@ -3,8 +3,8 @@
 import { useActionState } from "react";
 import { trackLoginAction, type TrackLoginState } from "./actions";
 
-export function TrackLoginForm({ googleUrl, compact = false }: { googleUrl: string; compact?: boolean }) {
-  const [state, action, pending] = useActionState<TrackLoginState, FormData>(trackLoginAction, {});
+export function TrackLoginForm({ googleUrl, compact = false, initialError }: { googleUrl: string; compact?: boolean; initialError?: string }) {
+  const [state, action, pending] = useActionState<TrackLoginState, FormData>(trackLoginAction, { error: initialError });
   return (
     <form action={action} className={`form trackbox${compact ? " compact" : ""}`}>
       <b>Entrar a la plataforma de rastreo</b>

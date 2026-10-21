@@ -69,6 +69,7 @@ model Company {
   aiEnabled            Boolean        @default(false)
   aiName               String?
   brandColor           String?
+  websiteUrl           String?        @db.VarChar(300)
   clientPlans          ClientPlan[]
   endClients           EndClient[]
 }

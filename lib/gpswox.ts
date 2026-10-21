@@ -271,3 +271,20 @@ export async function userIdByEmail(email: string): Promise<number | null> {
   }
   return emailIndex.map.get(key) ?? null;
 }
+
+// The user and its managers up to the root, nearest first; reseller = GPSWOX group 3 (white label / dealer).
+export async function brandChain(userId: number): Promise<{ id: number; reseller: boolean }[]> {
+  if (isMock()) return (await ancestors(userId)).map((id) => ({ id, reseller: false }));
+  return withGpswoxDb(async (conn) => {
+    const chain: { id: number; reseller: boolean }[] = [];
+    let id: number | null = userId;
+    while (id !== null && chain.length < 12) {
+      const [rows]: [RowDataPacket[], unknown] = await conn.query<RowDataPacket[]>("SELECT manager_id, group_id FROM users WHERE id = ?", [id]);
+      if (!rows[0]) break;
+      chain.push({ id, reseller: Number(rows[0].group_id) === 3 });
+      const manager: number | null = rows[0].manager_id ? Number(rows[0].manager_id) : null;
+      id = manager !== null && !chain.some((c) => c.id === manager) ? manager : null;
+    }
+    return chain;
+  });
+}
