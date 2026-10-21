@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { confirmCommand, rateLimit, resolveUser, type AiUser } from "./ai/assistant";
+import { aiSetting, confirmCommand, rateLimit, resolveUser, type AiUser } from "./ai/assistant";
 import { chat } from "./ai/engine";
 import { prisma } from "./db";
 
@@ -11,6 +11,7 @@ const secret = () => {
 const baseUrl = () => (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
 const LINK_MINUTES = 30;
 const CONFIRM_MS = 2 * 60_000;
+export const DIRECT_WA = "gpslink";
 
 export const internalKey = () => createHmac("sha256", secret()).update("gpslink-wa-internal").digest("hex");
 
@@ -84,15 +85,17 @@ export async function linkPhone(companyId: string, phone: string, user: AiUser) 
 }
 
 export async function handleIncoming(companyId: string, phone: string, text: string): Promise<string | null> {
-  const company = await prisma.company.findUnique({ where: { id: companyId } });
-  if (!company || !company.aiEnabled || company.status === "BLOCKED" || company.status === "CANCELED") return null;
+  const direct = companyId === DIRECT_WA;
+  const company = direct ? null : await prisma.company.findUnique({ where: { id: companyId } });
+  if (direct ? !(await aiSetting()).enabled : !company || !company.aiEnabled || company.status === "BLOCKED" || company.status === "CANCELED") return null;
+  const brand = company?.name ?? "GPS Link";
   const message = text.trim().slice(0, 1000);
   if (!message) return "Por ahora solo entiendo mensajes de texto.";
   if (rateLimit(`wa:${companyId}:${phone}`, 10) > 0) return null;
   const connectMsg = (intro: string) => `${intro}\n${baseUrl()}/wa/vincular?t=${linkToken(companyId, phone)}\n(El enlace vence en ${LINK_MINUTES} minutos.)`;
   const link = await prisma.waLink.findUnique({ where: { companyId_phone: { companyId, phone } } });
   const hash = unseal(link?.hashSealed);
-  if (!link || !hash) return connectMsg(`Hola, soy el asistente de ${company.name}. Para consultar tus vehículos por aquí, conecta tu cuenta una sola vez en este enlace:`);
+  if (!link || !hash) return connectMsg(`Hola, soy el asistente de ${brand}. Para consultar tus vehículos por aquí, conecta tu cuenta una sola vez en este enlace:`);
   let user: AiUser;
   try {
     user = await resolveUser(hash);
@@ -100,7 +103,7 @@ export async function handleIncoming(companyId: string, phone: string, text: str
     await prisma.waLink.delete({ where: { id: link.id } });
     return connectMsg("Tu sesión venció. Conecta tu cuenta otra vez aquí:");
   }
-  if (user.company?.id !== companyId) return null;
+  if ((user.company?.id ?? DIRECT_WA) !== companyId) return null;
 
   const pending = link.pendingUntil && link.pendingUntil > new Date() ? unseal(link.pendingToken) : null;
   const clearPending = () => prisma.waLink.update({ where: { id: link.id }, data: { pendingToken: null, pendingUntil: null } });

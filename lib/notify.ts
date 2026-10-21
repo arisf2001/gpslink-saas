@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { BRAND } from "./config";
+import { metaConfig, metaSend } from "./meta";
 
 export type ChannelResult = { channel: "email" | "whatsapp"; ok: boolean; error?: string };
 
@@ -41,9 +42,10 @@ export function normalizeWhatsAppNumber(phone: string): string | null {
   return digits.length === 10 ? `1${digits}` : digits;
 }
 
-// WhatsApp Cloud API (Meta). Messages started by the business need an approved template:
-// set WHATSAPP_TEMPLATE to a template with a single {{1}} body variable to carry the text.
+// WhatsApp Cloud API (Meta), configured in /admin/whatsapp (env vars are the fallback). Business-initiated messages need an approved template with a single {{1}} body variable.
 export async function sendWhatsApp(phone: string, text: string): Promise<ChannelResult> {
+  const meta = await metaConfig().catch(() => null);
+  if (meta) return { channel: "whatsapp", ...(await metaSend(meta, phone, text, { template: true })) };
   const { WHATSAPP_TOKEN, WHATSAPP_PHONE_ID, WHATSAPP_TEMPLATE, WHATSAPP_TEMPLATE_LANG } = process.env;
   if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
     console.log(`[whatsapp:dev] to=${phone} text=${text.slice(0, 80)}`);

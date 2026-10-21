@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/db";
-import { readLinkToken } from "@/lib/wa";
+import { DIRECT_WA, readLinkToken } from "@/lib/wa";
 import { LinkForm } from "./form";
 
 export const metadata: Metadata = { title: "Conectar WhatsApp", robots: { index: false } };
@@ -8,7 +8,7 @@ export const metadata: Metadata = { title: "Conectar WhatsApp", robots: { index:
 export default async function VincularPage({ searchParams }: { searchParams: Promise<{ t?: string }> }) {
   const token = (await searchParams).t ?? "";
   const target = readLinkToken(token);
-  const company = target ? await prisma.company.findUnique({ where: { id: target.companyId }, select: { name: true } }) : null;
+  const company = !target ? null : target.companyId === DIRECT_WA ? { name: "GPS Link" } : await prisma.company.findUnique({ where: { id: target.companyId }, select: { name: true } });
   return (
     <div className="wrap">
       <div className="panel narrow" style={{ marginTop: 40 }}>

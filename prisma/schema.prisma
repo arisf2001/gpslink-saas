@@ -308,3 +308,30 @@ model WaOutbox {
 
   @@index([status, companyId])
 }
+
+model MetaSetting {
+  id              Int      @id @default(1)
+  enabled         Boolean  @default(false)
+  phoneNumberId   String?
+  wabaId          String?
+  tokenSealed     String?  @db.Text
+  appSecretSealed String?  @db.Text
+  verifyToken     String
+  template        String?
+  templateLang    String   @default("es")
+  graphVersion    String   @default("v23.0")
+  updatedAt       DateTime @updatedAt
+}
+
+model MetaLog {
+  id        Int      @id @default(autoincrement())
+  direction String
+  phone     String
+  text      String   @db.Text
+  wamid     String?  @unique
+  ok        Boolean  @default(true)
+  error     String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

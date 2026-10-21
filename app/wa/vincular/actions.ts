@@ -2,7 +2,7 @@
 
 import { resolveUser } from "@/lib/ai/assistant";
 import { login } from "@/lib/ai/gps";
-import { linkPhone, readLinkToken } from "@/lib/wa";
+import { DIRECT_WA, linkPhone, readLinkToken } from "@/lib/wa";
 
 export type LinkState = { ok?: boolean; error?: string };
 
@@ -15,7 +15,7 @@ export async function linkWhatsAppAction(_prev: LinkState, formData: FormData): 
   const hash = await login(email, password).catch(() => null);
   if (!hash) return { error: "Correo o contraseña incorrectos." };
   const user = await resolveUser(hash).catch(() => null);
-  if (!user || user.company?.id !== target.companyId) return { error: "Esta cuenta no pertenece a este servicio de rastreo." };
+  if (!user || (user.company?.id ?? DIRECT_WA) !== target.companyId) return { error: "Esta cuenta no pertenece a este servicio de rastreo." };
   await linkPhone(target.companyId, target.phone, user);
   return { ok: true };
 }
