@@ -4,15 +4,17 @@ import { useEffect, useState } from "react";
 
 type State = { want: boolean; status: string; phone: string | null; error: string | null; workerUp: boolean; qr: string | null };
 
-export function WhatsAppStatus({ initial }: { initial: State }) {
+const COMPANY_CONNECTED = "El asistente ya responde a tus clientes y los avisos de cobro salen por aquí.";
+
+export function WhatsAppStatus({ initial, endpoint = "/api/cuenta/whatsapp", connectedText = COMPANY_CONNECTED }: { initial: State; endpoint?: string; connectedText?: string }) {
   const [s, setS] = useState(initial);
   useEffect(() => {
     if (!s.want || s.status === "CONNECTED") return;
-    const id = setInterval(() => fetch("/api/cuenta/whatsapp").then((r) => r.json()).then(setS).catch(() => {}), 3000);
+    const id = setInterval(() => fetch(endpoint).then((r) => r.json()).then(setS).catch(() => {}), 3000);
     return () => clearInterval(id);
-  }, [s.want, s.status]);
+  }, [s.want, s.status, endpoint]);
 
-  if (s.status === "CONNECTED") return <div className="ok">Conectado al número +{s.phone}. El asistente ya responde a tus clientes y los avisos de cobro salen por aquí.</div>;
+  if (s.status === "CONNECTED") return <div className="ok">Conectado al número +{s.phone}. {connectedText}</div>;
   if (!s.want) return s.error ? <div className="err">{s.error}</div> : null;
   if (s.qr)
     return (

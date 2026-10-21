@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { metaConfig, metaPhoneInfo, metaSend, metaSetting, sealSecret } from "@/lib/meta";
 import { getSession } from "@/lib/session";
+import { OWNER_WA, queueWa } from "@/lib/wa";
 
 async function requireAdmin() {
   if (!(await getSession("admin"))) redirect("/admin");
@@ -54,4 +55,24 @@ export async function sendMetaAction(formData: FormData) {
   if (!text) back("error", "Escribe el mensaje.");
   const r = await metaSend(cfg!, clean(formData.get("phone"), 20), text, { template: formData.get("template") === "on" });
   back(r.ok ? "ok" : "error", r.ok ? "Mensaje enviado" : r.error!);
+}
+
+export async function connectOwnerWaAction() {
+  await requireAdmin();
+  await prisma.waSession.upsert({ where: { companyId: OWNER_WA }, create: { companyId: OWNER_WA, want: true, status: "CONNECTING" }, update: { want: true, error: null } });
+  redirect("/admin/whatsapp");
+}
+
+export async function disconnectOwnerWaAction() {
+  await requireAdmin();
+  await prisma.waSession.updateMany({ where: { companyId: OWNER_WA }, data: { want: false } });
+  redirect("/admin/whatsapp");
+}
+
+export async function sendOwnerWaAction(formData: FormData) {
+  await requireAdmin();
+  const text = clean(formData.get("text"), 4000);
+  if (!text) back("error", "Escribe el mensaje.");
+  const queued = await queueWa(OWNER_WA, clean(formData.get("phone"), 20), text);
+  back(queued ? "ok" : "error", queued ? "Mensaje en cola: sale por tu WhatsApp QR en unos segundos." : "Conecta tu WhatsApp por QR y revisa el número (con código de país).");
 }

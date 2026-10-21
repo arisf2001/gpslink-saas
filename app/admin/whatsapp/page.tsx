@@ -4,8 +4,10 @@ import { prisma } from "@/lib/db";
 import { formatDate } from "@/lib/format";
 import { metaSetting } from "@/lib/meta";
 import { getSession } from "@/lib/session";
+import { OWNER_WA } from "@/lib/wa";
+import { WhatsAppStatus } from "../../cuenta/whatsapp/status";
 import { AdminShell } from "../admin-shell";
-import { saveMetaAction, sendMetaAction, testMetaAction } from "./actions";
+import { connectOwnerWaAction, disconnectOwnerWaAction, saveMetaAction, sendMetaAction, sendOwnerWaAction, testMetaAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -13,14 +15,59 @@ export default async function AdminWhatsAppPage({ searchParams }: { searchParams
   if (!(await getSession("admin"))) redirect("/admin");
   const { ok, error } = await searchParams;
   const s = await metaSetting();
-  const logs = await prisma.metaLog.findMany({ orderBy: { createdAt: "desc" }, take: 40 });
+  const [logs, qr, outbox] = await Promise.all([
+    prisma.metaLog.findMany({ orderBy: { createdAt: "desc" }, take: 40 }),
+    prisma.waSession.findUnique({ where: { companyId: OWNER_WA } }),
+    prisma.waOutbox.findMany({ where: { companyId: OWNER_WA }, orderBy: { id: "desc" }, take: 15 }),
+  ]);
+  const qrInitial = { want: qr?.want ?? false, status: qr?.status ?? "OFF", phone: qr?.phone ?? null, error: qr?.error ?? null, workerUp: true, qr: null };
   const webhook = `${appUrl()}/api/meta/webhook`;
 
   return (
     <AdminShell>
-      <h1 className="page-title">WhatsApp de GPS Link (API oficial de Meta)</h1>
+      <h1 className="page-title">WhatsApp de GPS Link</h1>
       {ok && <div className="ok" style={{ margin: "10px 0" }}>{ok}</div>}
       {error && <div className="err" style={{ margin: "10px 0" }}>{error}</div>}
+
+      <div className="panel" id="qr" style={{ margin: "14px 0" }}>
+        <h2 style={{ fontSize: 18, marginBottom: 10 }}>Tu número por QR (solo envía avisos)</h2>
+        <p className="hint" style={{ marginBottom: 10 }}>
+          Conecta tu WhatsApp con un código QR, como WhatsApp Web. Si el WhatsApp de Meta no está activo, por este número salen las facturas y avisos de cobro a tus marcas blancas, la bienvenida de los registros nuevos y los avisos de tus equipos. No contesta a nadie: los mensajes que te lleguen los respondes tú desde el teléfono.
+        </p>
+        <div className="err" style={{ marginBottom: 12, background: "#fffbeb", borderColor: "#fcd34d", color: "#92400e" }}>
+          Importante: esta conexión no es la oficial de Meta. Si WhatsApp detecta muchos mensajes automáticos puede bloquear el número. Usa un número solo para el negocio, no el personal.
+        </div>
+        <WhatsAppStatus key={`${qrInitial.want}-${qrInitial.status}`} initial={qrInitial} endpoint="/api/admin/whatsapp" connectedText={s.enabled ? "Meta está activo, así que los avisos salen por Meta; este número queda de respaldo." : "Los avisos y facturas salen por este número."} />
+        <div className="row" style={{ marginTop: 14, gap: 8 }}>
+          {!qr?.want ? (
+            <form action={connectOwnerWaAction}><button className="btn dark">Conectar WhatsApp</button></form>
+          ) : (
+            <form action={disconnectOwnerWaAction}><button className="btn sm red">Desconectar</button></form>
+          )}
+        </div>
+        {qr?.status === "CONNECTED" && (
+          <form action={sendOwnerWaAction} className="form" style={{ maxWidth: 620, marginTop: 14 }}>
+            <label>Mensaje de prueba: número (con código de país)<input name="phone" required placeholder="18095551234" inputMode="tel" /></label>
+            <label>Mensaje<textarea name="text" required rows={2} /></label>
+            <button className="btn sm dark">Enviar por mi WhatsApp QR</button>
+          </form>
+        )}
+        {outbox.length > 0 && (
+          <table className="t" style={{ marginTop: 14 }}>
+            <thead><tr><th>Fecha</th><th>Número</th><th>Mensaje</th><th>Estado</th></tr></thead>
+            <tbody>
+              {outbox.map((o) => (
+                <tr key={o.id}>
+                  <td>{formatDate(o.createdAt)}</td>
+                  <td>+{o.phone}</td>
+                  <td style={{ whiteSpace: "pre-wrap", maxWidth: 420 }}>{o.text.slice(0, 200)}</td>
+                  <td>{o.status === "sent" ? "Enviado" : o.status === "pending" ? "En cola" : <span style={{ color: "#b91c1c" }}>{o.error}</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       <div className="panel" style={{ margin: "14px 0" }}>
         <h2 style={{ fontSize: 18, marginBottom: 10 }}>Conexión</h2>

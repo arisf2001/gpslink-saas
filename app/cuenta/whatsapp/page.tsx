@@ -32,7 +32,7 @@ export default async function WhatsAppPage() {
           <div className="err" style={{ marginBottom: 12, background: "#fffbeb", borderColor: "#fcd34d", color: "#92400e" }}>
             Importante: esta conexión no es la oficial de Meta. Si WhatsApp detecta muchos mensajes automáticos puede bloquear el número. Usa un número solo para el negocio, no el personal.
           </div>
-          <WhatsAppStatus initial={initial} />
+          <WhatsAppStatus key={`${initial.want}-${initial.status}`} initial={initial} />
           <div className="row" style={{ marginTop: 14, gap: 8 }}>
             {!s?.want ? (
               <form action={connectWhatsAppAction}><button className="btn dark">Conectar WhatsApp</button></form>

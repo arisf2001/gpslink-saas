@@ -12,6 +12,8 @@ const baseUrl = () => (process.env.APP_URL ?? "http://localhost:3000").replace(/
 const LINK_MINUTES = 30;
 const CONFIRM_MS = 2 * 60_000;
 export const DIRECT_WA = "gpslink";
+// Owner's own number linked by QR: only sends notices/invoices, never answers.
+export const OWNER_WA = "gpslinkowner";
 
 export const internalKey = () => createHmac("sha256", secret()).update("gpslink-wa-internal").digest("hex");
 
