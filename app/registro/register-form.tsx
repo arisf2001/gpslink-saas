@@ -24,7 +24,7 @@ export function RegisterForm({ plans, planId }: { plans: PlanOption[]; planId: s
       <label>
         Código de empresa
         <input name="slug" defaultValue={v.slug} placeholder="Ej. perez" />
-        <span className="hint">Solo letras y números. Tus clientes lo usarán en la app. Si lo dejas vacío usamos el nombre.</span>
+        <span className="hint">Letras, números y guiones; será tu subdominio. Tus clientes lo usarán en la app. Si lo dejas vacío usamos el nombre.</span>
       </label>
       <label>
         Tu nombre
@@ -50,7 +50,7 @@ export function RegisterForm({ plans, planId }: { plans: PlanOption[]; planId: s
         <input name="password2" type="password" required autoComplete="new-password" minLength={8} />
       </label>
       <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}>
-        <input name="terms" type="checkbox" style={{ width: "auto" }} /> Acepto los términos del servicio
+        <input name="terms" type="checkbox" required style={{ width: "auto" }} /> Acepto los términos del servicio
       </label>
       <button className="btn" disabled={pending}>{pending ? "Creando tu plataforma..." : "Crear mi cuenta gratis"}</button>
       <p className="hint" style={{ textAlign: "center" }}>No pedimos tarjeta. Te avisamos 3, 2 y 1 día antes de que termine la prueba.</p>

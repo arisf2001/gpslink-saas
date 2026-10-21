@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { applyCheckoutSession } from "@/lib/checkout";
-import { CATEGORY_LABELS, STATUS_LABELS, formatDate, formatMoney } from "@/lib/format";
+import { BRAND } from "@/lib/config";
+import { CATEGORY_LABELS, METHOD_LABELS, STATUS_LABELS, formatDate, formatMoney } from "@/lib/format";
 import { resellerLoginUrl } from "@/lib/gpswox";
 import { accessEndsAt, daysLeft } from "@/lib/lifecycle";
 import { getSession } from "@/lib/session";
@@ -68,7 +69,7 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
             <dt>Estado</dt><dd><span className={`tag ${company.status}`}>{STATUS_LABELS[company.status]}</span></dd>
             <dt>Paquete</dt><dd>{CATEGORY_LABELS[company.plan.category]} · {company.plan.devices} equipos GPS</dd>
             <dt>Precio anual</dt><dd>{company.plan.priceCents > 0 ? formatMoney(company.plan.priceCents, company.plan.currency) : "Por definir"}</dd>
-            <dt>{company.status === "TRIAL" ? "Prueba gratis hasta" : "Activa hasta"}</dt><dd>{formatDate(accessEndsAt(company))}</dd>
+            <dt>{company.status === "TRIAL" ? "Prueba gratis hasta" : company.status === "BLOCKED" ? "Venció el" : "Activa hasta"}</dt><dd>{formatDate(accessEndsAt(company))}</dd>
             <dt>Código de empresa</dt><dd><b>{company.slug}</b></dd>
             <dt>Tu plataforma</dt><dd><a href={resellerLoginUrl()} target="_blank" rel="noreferrer" style={{ color: "var(--p)", fontWeight: 700 }}>{resellerLoginUrl()}</a><div className="hint">Entra con tu correo ({company.email}) y tu contraseña. Ahí pones tu logo y colores, y creas tus clientes.</div></dd>
           </dl>
@@ -78,7 +79,7 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
               {company.status === "TRIAL" && <p className="hint" style={{ marginTop: 8 }}>Si pagas antes, no pierdes los días de prueba que te quedan: el año empieza cuando termina la prueba.</p>}
             </form>
           ) : (
-            <p className="hint">El pago en línea se activará pronto. Te avisaremos antes de que termine tu prueba.</p>
+            <p className="hint">Para pagar tu año escríbenos a {BRAND.supportEmail}{BRAND.supportWhatsApp ? ` o al WhatsApp ${BRAND.supportWhatsApp}` : ""}. Activamos tu cuenta en cuanto confirmemos el pago.</p>
           )}
         </div>
 
@@ -89,7 +90,7 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
               <thead><tr><th>Fecha</th><th>Monto</th><th>Método</th><th>Período</th></tr></thead>
               <tbody>
                 {company.payments.map((p) => (
-                  <tr key={p.id}><td>{formatDate(p.createdAt)}</td><td>{formatMoney(p.amountCents, p.currency)}</td><td>{p.method}</td><td>{formatDate(p.periodStart)} – {formatDate(p.periodEnd)}</td></tr>
+                  <tr key={p.id}><td>{formatDate(p.createdAt)}</td><td>{formatMoney(p.amountCents, p.currency)}</td><td>{METHOD_LABELS[p.method] ?? p.method}</td><td>{formatDate(p.periodStart)} – {formatDate(p.periodEnd)}</td></tr>
                 ))}
               </tbody>
             </table>

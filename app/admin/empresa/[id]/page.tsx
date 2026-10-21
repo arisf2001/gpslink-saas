@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { CATEGORY_LABELS, STATUS_LABELS, formatDate, formatMoney } from "@/lib/format";
+import { CATEGORY_LABELS, METHOD_LABELS, NOTIFICATION_LABELS, STATUS_LABELS, formatDate, formatMoney } from "@/lib/format";
 import { accessEndsAt, daysLeft } from "@/lib/lifecycle";
 import { getSession } from "@/lib/session";
 import { blockAction, changePlanAction, extendAction, markPaidAction, unblockAction } from "../../actions";
@@ -79,7 +79,7 @@ export default async function EmpresaPage({ params, searchParams }: { params: Pr
           <thead><tr><th>Fecha</th><th>Monto</th><th>Método</th><th>Período</th><th>Nota</th></tr></thead>
           <tbody>
             {company.payments.length === 0 && <tr><td colSpan={5} className="hint">Sin pagos.</td></tr>}
-            {company.payments.map((p) => <tr key={p.id}><td>{formatDate(p.createdAt)}</td><td>{formatMoney(p.amountCents, p.currency)}</td><td>{p.method}</td><td>{formatDate(p.periodStart)} – {formatDate(p.periodEnd)}</td><td>{p.note ?? ""}</td></tr>)}
+            {company.payments.map((p) => <tr key={p.id}><td>{formatDate(p.createdAt)}</td><td>{formatMoney(p.amountCents, p.currency)}</td><td>{METHOD_LABELS[p.method] ?? p.method}</td><td>{formatDate(p.periodStart)} – {formatDate(p.periodEnd)}</td><td>{p.note ?? ""}</td></tr>)}
           </tbody>
         </table>
       </div>
@@ -89,7 +89,7 @@ export default async function EmpresaPage({ params, searchParams }: { params: Pr
           <thead><tr><th>Fecha</th><th>Aviso</th><th>Enviado por</th><th>Error</th></tr></thead>
           <tbody>
             {company.notifications.length === 0 && <tr><td colSpan={4} className="hint">Sin avisos.</td></tr>}
-            {company.notifications.map((n) => <tr key={n.id}><td>{formatDate(n.createdAt)}</td><td>{n.kind}</td><td>{n.channels || "—"}</td><td className="hint">{n.error ?? ""}</td></tr>)}
+            {company.notifications.map((n) => <tr key={n.id}><td>{formatDate(n.createdAt)}</td><td>{NOTIFICATION_LABELS[n.kind] ?? n.kind}</td><td>{n.channels || "—"}</td><td className="hint">{n.error ?? ""}</td></tr>)}
           </tbody>
         </table>
       </div>

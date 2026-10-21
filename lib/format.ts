@@ -19,6 +19,23 @@ export const CATEGORY_LABELS = {
   FLEET: "Flotas y empresas",
 } as const;
 
+export const METHOD_LABELS: Record<string, string> = {
+  stripe: "Tarjeta (Stripe)",
+  deposito: "Depósito / transferencia",
+  azul: "Azul",
+  efectivo: "Efectivo",
+  manual: "Otro",
+};
+
+export const NOTIFICATION_LABELS: Record<string, string> = {
+  welcome: "Bienvenida",
+  reminder_3: "Aviso: faltan 3 días",
+  reminder_2: "Aviso: faltan 2 días",
+  reminder_1: "Aviso: falta 1 día",
+  blocked: "Cuenta bloqueada",
+  paid: "Pago recibido",
+};
+
 export const STATUS_LABELS = {
   TRIAL: "Prueba gratis",
   ACTIVE: "Activa",
