@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { CATEGORY_LABELS } from "@/lib/format";
 import { ensureDefaultPlans } from "@/lib/plans";
 import { getSession } from "@/lib/session";
-import { savePlanAction } from "../actions";
+import { saveCategoryPriceAction, savePlanAction } from "../actions";
 import { AdminShell } from "../admin-shell";
 
 export const dynamic = "force-dynamic";
@@ -13,11 +13,12 @@ export default async function PlanesPage({ searchParams }: { searchParams: Promi
   const { ok, error } = await searchParams;
   await ensureDefaultPlans();
   const plans = await prisma.plan.findMany({ orderBy: [{ sortOrder: "asc" }, { devices: "asc" }] });
+  const prices = new Map((await prisma.categoryPrice.findMany()).map((p) => [p.category, p]));
 
   return (
     <AdminShell>
       <h1 className="page-title">Planes y precios</h1>
-      <p className="hint" style={{ fontSize: 14, marginBottom: 12 }}>Precio por año en dólares. Si el precio está en 0, la página muestra &quot;Consultar&quot; y no se puede pagar en línea. Una característica por línea.</p>
+      <p className="hint" style={{ fontSize: 14, marginBottom: 12 }}>Precio por año en dólares. El paquete compra esa cantidad de equipos; cada equipo cuenta su año desde que se agrega. Si el precio está en 0, la página muestra &quot;Consultar&quot; y no se puede pagar en línea. Una característica por línea.</p>
       {error && <div className="err" style={{ marginBottom: 10 }}>Precio no válido. Usa solo números, por ejemplo 1490 o 1490.50.</div>}
       {(Object.keys(CATEGORY_LABELS) as (keyof typeof CATEGORY_LABELS)[]).map((cat) => (
         <div key={cat} className="panel" style={{ marginBottom: 18, padding: 18 }}>
@@ -43,6 +44,12 @@ export default async function PlanesPage({ searchParams }: { searchParams: Promi
               ))}
             </tbody>
           </table>
+          <form action={saveCategoryPriceAction} className="row" style={{ marginTop: 12, alignItems: "flex-end" }}>
+            <input type="hidden" name="category" value={cat} />
+            <label style={{ fontSize: 13 }}>Bloque de 10 equipos extra (USD/año)<input name="blockPrice" defaultValue={((prices.get(cat)?.blockPriceCents ?? 0) / 100).toString()} inputMode="decimal" /></label>
+            <label style={{ fontSize: 13 }}>Renovación por equipo (USD/año)<input name="renewalPrice" defaultValue={((prices.get(cat)?.renewalPriceCents ?? 0) / 100).toString()} inputMode="decimal" /></label>
+            <button className="btn sm">{ok === `precios-${cat}` ? "Guardado ✓" : "Guardar"}</button>
+          </form>
         </div>
       ))}
     </AdminShell>

@@ -16,7 +16,6 @@ enum PlanCategory {
 enum CompanyStatus {
   TRIAL
   ACTIVE
-  PAST_DUE
   BLOCKED
   CANCELED
 }
@@ -39,6 +38,15 @@ model Plan {
   @@unique([category, devices])
 }
 
+// Price of a block of 10 extra devices and of renewing one device for a year, per category.
+model CategoryPrice {
+  category          PlanCategory @id
+  blockPriceCents   Int          @default(0)
+  renewalPriceCents Int          @default(0)
+  currency          String       @default("usd")
+  updatedAt         DateTime     @updatedAt
+}
+
 model Company {
   id                   String         @id @default(cuid())
   name                 String
@@ -51,29 +59,54 @@ model Company {
   plan                 Plan           @relation(fields: [planId], references: [id])
   status               CompanyStatus  @default(TRIAL)
   trialEndsAt          DateTime
-  paidUntil            DateTime?
   gpswoxUserId         Int?
+  gpswoxLimit          Int?
   provisionError       String?        @db.Text
   stripeCustomerId     String?
-  stripeSubscriptionId String?
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
   payments             Payment[]
   notifications        Notification[]
+  slots                Slot[]
 }
 
 model Payment {
-  id              String   @id @default(cuid())
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  kind        String
+  devices     Int
+  planId      String?
+  amountCents Int
+  currency    String
+  method      String
+  reference   String?  @unique
+  note        String?
+  createdAt   DateTime @default(now())
+  slots       Slot[]
+}
+
+// One paid device for one year. The year starts when a device takes the slot.
+model Slot {
+  id              String    @id @default(cuid())
   companyId       String
-  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  amountCents     Int
-  currency        String
-  method          String
-  reference       String?  @unique
-  periodStart     DateTime
-  periodEnd       DateTime
-  note            String?
-  createdAt       DateTime @default(now())
+  company         Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  paymentId       String
+  payment         Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  deviceId        Int?
+  startsAt        DateTime?
+  endsAt          DateTime?
+  expiredNotified Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+
+  @@index([companyId])
+}
+
+// Last expiration date pushed to GPSWOX for each device, to avoid repeating API calls.
+model DeviceSync {
+  deviceId  Int      @id
+  companyId String
+  expiresAt DateTime
 }
 
 model Notification {
@@ -85,6 +118,12 @@ model Notification {
   channels  String
   error     String?  @db.Text
   createdAt DateTime @default(now())
+}
+
+model MockDevice {
+  id           Int      @id @default(autoincrement())
+  gpswoxUserId Int
+  createdAt    DateTime @default(now())
 }
 
 model ProcessedEvent {

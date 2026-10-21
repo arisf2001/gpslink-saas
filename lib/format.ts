@@ -29,17 +29,26 @@ export const METHOD_LABELS: Record<string, string> = {
 
 export const NOTIFICATION_LABELS: Record<string, string> = {
   welcome: "Bienvenida",
-  reminder_3: "Aviso: faltan 3 días",
-  reminder_2: "Aviso: faltan 2 días",
-  reminder_1: "Aviso: falta 1 día",
+  reminder_3: "Prueba: faltan 3 días",
+  reminder_2: "Prueba: faltan 2 días",
+  reminder_1: "Prueba: falta 1 día",
   blocked: "Cuenta bloqueada",
   paid: "Pago recibido",
+  devices_due_3: "Equipos vencen en 3 días",
+  devices_due_2: "Equipos vencen en 2 días",
+  devices_due_1: "Equipos vencen en 1 día",
+  devices_expired: "Equipos vencidos",
 };
+
+export function paymentLabel(p: { kind: string; devices: number }): string {
+  if (p.kind === "plan") return `Paquete de ${p.devices} equipos`;
+  if (p.kind === "block") return `${p.devices} equipos extra`;
+  return `Renovación de ${p.devices} ${p.devices === 1 ? "equipo" : "equipos"}`;
+}
 
 export const STATUS_LABELS = {
   TRIAL: "Prueba gratis",
   ACTIVE: "Activa",
-  PAST_DUE: "Pago pendiente",
   BLOCKED: "Bloqueada",
   CANCELED: "Cancelada",
 } as const;

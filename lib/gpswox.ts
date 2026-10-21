@@ -1,4 +1,6 @@
+import mysql, { type RowDataPacket } from "mysql2/promise";
 import { trackerUrl } from "./config";
+import { prisma } from "./db";
 
 // Talks to the GPSWOX admin API on track.gpslinkusa.com with an admin account's user_api_hash.
 // GPSWOX_MODE=mock keeps everything local (dev/tests) without touching the real platform.
@@ -58,7 +60,7 @@ async function call(method: "POST" | "PUT", path: string, body: Record<string, u
   return data;
 }
 
-let mockSeq = 1000;
+let mockSeq = Math.floor(Date.now() / 1000);
 
 export async function createReseller(input: ResellerInput): Promise<number> {
   if (isMock()) return ++mockSeq;
@@ -104,4 +106,37 @@ export async function updateReseller(id: number, email: string, changes: { devic
 
 export function resellerLoginUrl(): string {
   return `${trackerUrl()}/login`;
+}
+
+export type GpswoxDevice = { id: number; createdAt: Date };
+
+// Devices of the reseller and of its clients, oldest first. Read-only access to the GPSWOX database.
+export async function deviceList(userId: number): Promise<GpswoxDevice[]> {
+  if (isMock()) {
+    const devices = await prisma.mockDevice.findMany({ where: { gpswoxUserId: userId }, orderBy: { createdAt: "asc" } });
+    return devices.map((d) => ({ id: d.id, createdAt: d.createdAt }));
+  }
+  const url = process.env.GPSWOX_DB_URL;
+  if (!url) throw new Error("GPSWOX_DB_URL no configurado");
+  const conn = await mysql.createConnection(url);
+  try {
+    const [rows] = await conn.query<RowDataPacket[]>(
+      `SELECT d.id AS id, d.created_at AS created_at
+         FROM devices d
+         JOIN user_device_pivot p ON p.device_id = d.id
+         JOIN users u ON u.id = p.user_id
+        WHERE u.id = ? OR u.manager_id = ?
+        GROUP BY d.id, d.created_at
+        ORDER BY d.created_at`,
+      [userId, userId],
+    );
+    return rows.map((r) => ({ id: Number(r.id), createdAt: new Date(r.created_at) }));
+  } finally {
+    await conn.end();
+  }
+}
+
+export async function setDeviceExpiration(deviceId: number, expiresAt: Date): Promise<void> {
+  if (isMock()) return;
+  await call("POST", `device/${deviceId}/expiration`, { expiration_date: gpswoxDate(expiresAt) });
 }

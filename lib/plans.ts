@@ -2,7 +2,7 @@ import type { PlanCategory } from "@prisma/client";
 import { prisma } from "./db";
 import { CATEGORY_LABELS } from "./format";
 
-export const PACKAGE_SIZES = [50, 100, 300, 400, 500, 1000] as const;
+export const PACKAGE_SIZES = [20, 50, 100, 300, 400, 500, 1000] as const;
 
 export const DEFAULT_FEATURES = [
   "Tu marca: logo, colores y nombre",
@@ -15,8 +15,9 @@ export const DEFAULT_FEATURES = [
 
 // Prices start at $0 on purpose: the owner sets real prices from /admin before going live.
 export async function ensureDefaultPlans() {
-  if (await prisma.plan.count()) return;
   const categories = Object.keys(CATEGORY_LABELS) as PlanCategory[];
+  const [plans, prices] = await Promise.all([prisma.plan.count(), prisma.categoryPrice.count()]);
+  if (plans >= categories.length * PACKAGE_SIZES.length && prices >= categories.length) return;
   for (const [ci, category] of categories.entries()) {
     for (const [si, devices] of PACKAGE_SIZES.entries()) {
       await prisma.plan.upsert({
@@ -33,6 +34,7 @@ export async function ensureDefaultPlans() {
         },
       });
     }
+    await prisma.categoryPrice.upsert({ where: { category }, update: {}, create: { category } });
   }
 }
 

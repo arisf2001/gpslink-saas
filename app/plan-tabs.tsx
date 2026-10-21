@@ -18,10 +18,13 @@ function money(cents: number, currency: string) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase(), maximumFractionDigits: cents % 100 === 0 ? 0 : 2 }).format(cents / 100);
 }
 
-export function PlanTabs({ plans, labels, trialMonths }: { plans: PublicPlan[]; labels: Record<string, string>; trialMonths: number }) {
+export type BlockPrice = { priceCents: number; currency: string };
+
+export function PlanTabs({ plans, labels, trialMonths, blockPrices }: { plans: PublicPlan[]; labels: Record<string, string>; trialMonths: number; blockPrices: Record<string, BlockPrice> }) {
   const categories = Object.keys(labels).filter((c) => plans.some((p) => p.category === c));
   const [active, setActive] = useState(categories[0]);
   const visible = plans.filter((p) => p.category === active);
+  const block = blockPrices[active];
 
   return (
     <>
@@ -32,7 +35,7 @@ export function PlanTabs({ plans, labels, trialMonths }: { plans: PublicPlan[]; 
           </button>
         ))}
       </div>
-      <div className="free">Todos los planes incluyen {trialMonths} meses gratis. No pedimos tarjeta.</div>
+      <div className="free">{trialMonths} meses gratis para probar, sin tarjeta. Después eliges tu paquete.</div>
       <div className="grid">
         {visible.map((p) => (
           <div key={p.id} className={`card${p.highlighted ? " pop" : ""}`}>
@@ -55,6 +58,9 @@ export function PlanTabs({ plans, labels, trialMonths }: { plans: PublicPlan[]; 
           </div>
         ))}
       </div>
+      <p className="sub" style={{ marginTop: 22, textAlign: "center" }}>
+        Cada equipo cuenta su año desde el día en que lo agregas. ¿Necesitas más? Agrega bloques de 10 equipos{block && block.priceCents > 0 ? ` por ${money(block.priceCents, block.currency)} al año` : ""}.
+      </p>
     </>
   );
 }

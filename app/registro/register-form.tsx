@@ -12,10 +12,11 @@ export function RegisterForm({ plans, planId }: { plans: PlanOption[]; planId: s
     <form action={action} className="form">
       {state.error && <div className="err" role="alert">{state.error}</div>}
       <label>
-        Paquete
+        Equipos para tu prueba
         <select name="planId" defaultValue={v.planId ?? planId} required>
           {plans.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
         </select>
+        <span className="hint">Durante la prueba puedes usar hasta esa cantidad de equipos. Al terminar eliges y pagas tu paquete.</span>
       </label>
       <label>
         Nombre de tu empresa

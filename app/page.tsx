@@ -21,6 +21,7 @@ export default async function Home() {
     features: featureList(p.features),
     highlighted: p.highlighted,
   }));
+  const blockPrices = Object.fromEntries((await prisma.categoryPrice.findMany()).map((p) => [p.category, { priceCents: p.blockPriceCents, currency: p.currency }]));
   const months = Math.round(TRIAL_DAYS / 30);
 
   return (
@@ -55,7 +56,7 @@ export default async function Home() {
         <div className="wrap">
           <h2>Planes</h2>
           <div className="sub">Pago anual. Paquetes por equipo GPS.</div>
-          <PlanTabs plans={publicPlans} labels={CATEGORY_LABELS} trialMonths={months} />
+          <PlanTabs plans={publicPlans} labels={CATEGORY_LABELS} trialMonths={months} blockPrices={blockPrices} />
         </div>
       </section>
 

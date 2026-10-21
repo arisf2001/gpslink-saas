@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { CATEGORY_LABELS, STATUS_LABELS, formatDate } from "@/lib/format";
-import { accessEndsAt, daysLeft } from "@/lib/lifecycle";
+import { daysUntil, slotIsActive, slotIsFree } from "@/lib/lifecycle";
 import { getSession } from "@/lib/session";
 import { runLifecycleAction } from "./actions";
 import { AdminLogin } from "./admin-login";
@@ -16,7 +16,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     );
   }
   const { ok, estado } = await searchParams;
-  const companies = await prisma.company.findMany({ include: { plan: true }, orderBy: { createdAt: "desc" } });
+  const companies = await prisma.company.findMany({ include: { plan: true, slots: true }, orderBy: { createdAt: "desc" } });
   const counts = companies.reduce<Record<string, number>>((acc, c) => ({ ...acc, [c.status]: (acc[c.status] ?? 0) + 1 }), {});
   const list = estado ? companies.filter((c) => c.status === estado) : companies;
   const now = new Date();
@@ -35,7 +35,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         ))}
       </div>
       <table className="t">
-        <thead><tr><th>Empresa</th><th>Contacto</th><th>Paquete</th><th>Estado</th><th>Vence</th><th>Días</th><th></th></tr></thead>
+        <thead><tr><th>Empresa</th><th>Contacto</th><th>Paquete</th><th>Estado</th><th>Prueba / equipos</th><th>Días</th><th></th></tr></thead>
         <tbody>
           {list.length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--muted)" }}>Todavía no hay empresas.</td></tr>}
           {list.map((c) => (
@@ -44,8 +44,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
               <td>{c.contactName}<div className="hint">{c.email} · {c.phone}</div></td>
               <td>{c.plan.devices} equipos<div className="hint">{CATEGORY_LABELS[c.plan.category]}</div></td>
               <td><span className={`tag ${c.status}`}>{STATUS_LABELS[c.status]}</span></td>
-              <td>{formatDate(accessEndsAt(c))}</td>
-              <td>{c.status === "BLOCKED" || c.status === "CANCELED" ? "—" : daysLeft(c, now)}</td>
+              <td>{c.slots.length ? `${c.slots.filter((s) => slotIsActive(s, now)).length} en uso de ${c.slots.filter((s) => slotIsActive(s, now) || slotIsFree(s, now)).length} pagados` : `Prueba hasta ${formatDate(c.trialEndsAt)}`}</td>
+              <td>{c.status === "TRIAL" ? daysUntil(c.trialEndsAt, now) : "—"}</td>
               <td><Link href={`/admin/empresa/${c.id}`} className="btn sm s">Ver</Link></td>
             </tr>
           ))}

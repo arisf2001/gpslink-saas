@@ -1,5 +1,9 @@
 export const TRIAL_DAYS = 90;
 export const REMINDER_DAYS = [3, 2, 1] as const;
+export const ADDON_DEVICES = 10;
+export const RENEWAL_WINDOW_DAYS = 30;
+// Once a company pays, access is controlled per device, so the reseller account itself stays open.
+export const RESELLER_OPEN_DAYS = 3650;
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function appUrl(): string {
