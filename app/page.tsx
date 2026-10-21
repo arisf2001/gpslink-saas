@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { TRIAL_DAYS } from "@/lib/config";
 import { ensureDefaultPlans } from "@/lib/plans";
+import { TrackLoginForm } from "./entrar/form";
 import { SiteNav } from "./site-nav";
 import { PricingTiers, type PublicTier } from "./plan-tabs";
 
@@ -80,6 +81,7 @@ export default async function Home() {
             <Link href="#planes" className="btn">Empezar {months} meses gratis</Link>
             &nbsp;&nbsp;
             <Link href="#como-funciona" className="btn o">Cómo funciona</Link>
+            <TrackLoginForm compact />
           </div>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img className="ph" src="/phone.png" alt="App de rastreo GPS" />

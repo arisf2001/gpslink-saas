@@ -102,3 +102,8 @@ table.t input{font:inherit;padding:6px 8px;border:1.5px solid #d1d5db;border-rad
 .ia-confirm{display:grid;gap:8px;padding:12px;border:2px solid var(--r);border-radius:12px;background:#fff7f7}
 .ia-input{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)}
 .linkbtn{background:none;border:0;color:var(--muted);text-decoration:underline;cursor:pointer;font-size:13px}
+.trackbox{display:grid;gap:10px;background:#fff;color:#111827;border-radius:14px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.12)}
+.trackbox.compact{margin-top:22px;max-width:420px;grid-template-columns:1fr 1fr}
+.trackbox.compact b,.trackbox.compact .err,.trackbox.compact .btn{grid-column:1/-1}
+.trackbox .err{color:var(--r);font-size:14px;margin:0}
+@media(max-width:640px){.trackbox.compact{grid-template-columns:1fr}}

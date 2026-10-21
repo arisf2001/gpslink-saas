@@ -16,6 +16,7 @@ export function SiteNav() {
           <Link href="/#funciones" className="hide-m">Funciones</Link>
           <Link href="/#como-funciona" className="hide-m">Cómo funciona</Link>
           <Link href="/#planes" className="hide-m">Planes</Link>
+          <Link href="/entrar" style={{ fontWeight: 700, color: "var(--p)" }}>Entrar a la plataforma</Link>
           <Link href="/cuenta" style={{ fontWeight: 700, color: "var(--p)" }}>Mi cuenta</Link>
           <Link href="/#planes" className="btn">Prueba gratis</Link>
         </div>
