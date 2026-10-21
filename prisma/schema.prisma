@@ -269,3 +269,42 @@ model AiCommandLog {
   error        String?  @db.Text
   createdAt    DateTime @default(now())
 }
+
+model WaSession {
+  companyId String    @id
+  want      Boolean   @default(false)
+  status    String    @default("OFF")
+  qr        String?   @db.Text
+  phone     String?
+  error     String?   @db.Text
+  beatAt    DateTime?
+  updatedAt DateTime  @updatedAt
+}
+
+model WaLink {
+  id             String    @id @default(cuid())
+  companyId      String
+  phone          String
+  gpswoxUserId   Int
+  hashSealed     String    @db.Text
+  conversationId String?
+  pendingToken   String?   @db.Text
+  pendingUntil   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([companyId, phone])
+}
+
+model WaOutbox {
+  id        Int       @id @default(autoincrement())
+  companyId String
+  phone     String
+  text      String    @db.Text
+  status    String    @default("pending")
+  error     String?   @db.Text
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  @@index([status, companyId])
+}

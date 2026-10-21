@@ -4,6 +4,7 @@ const LINKS = [
   { key: "cuenta", href: "/cuenta", label: "Mi cuenta" },
   { key: "clientes", href: "/cuenta/clientes", label: "Mis clientes" },
   { key: "planes", href: "/cuenta/planes", label: "Mis planes" },
+  { key: "whatsapp", href: "/cuenta/whatsapp", label: "Mi WhatsApp" },
 ] as const;
 
 export function CuentaNav({ active }: { active: (typeof LINKS)[number]["key"] }) {

@@ -4,6 +4,7 @@ import { formatDate, formatMoney } from "./format";
 import { clientsUnder, setUserActive } from "./gpswox";
 import { reminderDayFor } from "./lifecycle";
 import { emailHtml, sendEmail } from "./notify";
+import { queueWa } from "./wa";
 
 // White labels bill their own clients and dealers: each one has an optional plan and a paid-until date.
 // Without a plan a client never expires; when the date passes it is deactivated in GPSWOX until it pays.
@@ -115,7 +116,9 @@ async function noticeOnce(company: Company, client: EndClient, kind: string, ded
     fromName: company.name,
     replyTo: company.email,
   });
-  await prisma.clientNotice.update({ where: { dedupeKey }, data: { channels: result.ok ? "email" : "", error: result.ok ? null : `email: ${result.error}` } });
+  const wa = await queueWa(company.id, client.phone, [`*${message.title}*`, ...message.lines, `${company.name} · ${contact}`].join("\n")).catch(() => false);
+  const channels = [result.ok && "email", wa && "whatsapp"].filter(Boolean).join(",");
+  await prisma.clientNotice.update({ where: { dedupeKey }, data: { channels, error: result.ok ? null : `email: ${result.error}` } });
   return true;
 }
 
