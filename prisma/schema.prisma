@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlanCategory {
+  WHITE_LABEL
+  RENTAL
+  FLEET
+}
+
+enum CompanyStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  BLOCKED
+  CANCELED
+}
+
+model Plan {
+  id          String       @id @default(cuid())
+  category    PlanCategory
+  devices     Int
+  name        String
+  priceCents  Int          @default(0)
+  currency    String       @default("usd")
+  features    String       @db.Text
+  active      Boolean      @default(true)
+  highlighted Boolean      @default(false)
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  companies   Company[]
+
+  @@unique([category, devices])
+}
+
+model Company {
+  id                   String         @id @default(cuid())
+  name                 String
+  slug                 String         @unique
+  contactName          String
+  email                String         @unique
+  phone                String
+  passwordHash         String
+  planId               String
+  plan                 Plan           @relation(fields: [planId], references: [id])
+  status               CompanyStatus  @default(TRIAL)
+  trialEndsAt          DateTime
+  paidUntil            DateTime?
+  gpswoxUserId         Int?
+  provisionError       String?        @db.Text
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  payments             Payment[]
+  notifications        Notification[]
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  amountCents     Int
+  currency        String
+  method          String
+  reference       String?  @unique
+  periodStart     DateTime
+  periodEnd       DateTime
+  note            String?
+  createdAt       DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  kind      String
+  dedupeKey String   @unique
+  channels  String
+  error     String?  @db.Text
+  createdAt DateTime @default(now())
+}
+
+model ProcessedEvent {
+  id        String   @id
+  createdAt DateTime @default(now())
+}
