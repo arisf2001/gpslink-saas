@@ -3,6 +3,7 @@ import Link from "next/link";
 const LINKS = [
   { key: "cuenta", href: "/cuenta", label: "Mi cuenta" },
   { key: "clientes", href: "/cuenta/clientes", label: "Mis clientes" },
+  { key: "equipos", href: "/cuenta/equipos", label: "Mis equipos" },
   { key: "planes", href: "/cuenta/planes", label: "Mis planes" },
   { key: "whatsapp", href: "/cuenta/whatsapp", label: "Mi WhatsApp" },
   { key: "web", href: "/cuenta/web", label: "Mi web" },

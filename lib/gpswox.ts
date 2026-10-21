@@ -15,7 +15,7 @@ export type ResellerInput = {
 
 let cachedHash: string | null = null;
 
-function isMock() {
+export function isMock() {
   return process.env.GPSWOX_MODE === "mock";
 }
 
@@ -120,7 +120,7 @@ export type GpswoxDevice = { id: number; createdAt: Date };
 
 type TreeNode = { id: number; managerId: number | null };
 
-async function withGpswoxDb<T>(fn: (conn: mysql.Connection) => Promise<T>): Promise<T> {
+export async function withGpswoxDb<T>(fn: (conn: mysql.Connection) => Promise<T>): Promise<T> {
   const url = process.env.GPSWOX_DB_URL;
   if (!url) throw new Error("GPSWOX_DB_URL no configurado");
   const conn = await mysql.createConnection(url);

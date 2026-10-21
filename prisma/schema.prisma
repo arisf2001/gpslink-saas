@@ -129,6 +129,9 @@ model MockDevice {
   id           Int      @id @default(autoincrement())
   gpswoxUserId Int
   createdAt    DateTime @default(now())
+  name         String?
+  other        String?  @db.Text
+  reportedAt   DateTime?
 }
 
 model ProcessedEvent {
@@ -335,6 +338,33 @@ model MetaLog {
   ok        Boolean  @default(true)
   error     String?  @db.Text
   createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model AlertSetting {
+  id           Int      @id @default(1)
+  enabled      Boolean  @default(true)
+  ownerPhone   String?  @db.VarChar(30)
+  lowBattery   Int      @default(20)
+  offlineHours Int      @default(24)
+  updatedAt    DateTime @updatedAt
+}
+
+model DeviceAlertState {
+  deviceId  Int      @id
+  state     String   @db.Text
+  updatedAt DateTime @updatedAt
+}
+
+model DeviceAlert {
+  id         Int      @id @default(autoincrement())
+  deviceId   Int
+  deviceName String
+  companyId  String?
+  kind       String
+  sentTo     Int      @default(0)
+  createdAt  DateTime @default(now())
 
   @@index([createdAt])
 }

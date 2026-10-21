@@ -1,6 +1,7 @@
 import { prisma } from "../db";
 import { aiSetting, assistantConfig, createConfirm, hasPin, t, type AiUser, type Channel, type Lang, type PendingConfirm } from "./assistant";
 import * as gps from "./gps";
+import { deviceStatuses } from "../device-status";
 
 export type AiAction =
   | { type: "open_map"; device_id: number; lat: number; lng: number; label: string; url: string }
@@ -32,6 +33,7 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
     `Current local time (America/Santo_Domingo): ${localNow()}.`,
     "You only know the customer's own vehicles, through the tools. Never invent locations, speeds or data; if a tool fails, say so.",
     "Be brief and concrete (2-4 short sentences). Include the address, speed, whether the ignition is on/off when known and how long ago the last report was.",
+    "When you describe one vehicle, add one short line with its GPS device status from gps_device: battery %, GSM signal (x/4), satellites, whether it is connected to the vehicle power and whether the engine is blocked. Say \"no disponible\" for missing values; never invent them. If it is not connected to the vehicle power, point it out.",
     "When several vehicles match, ask which one. If the customer has only one vehicle, use it.",
     "Street View images are from Google and are not live; the location and speed are live.",
     "Engine stop/resume: only when the customer asks, and only through request_engine_command. Never say it was executed: tell the customer to confirm with their PIN. If the vehicle is moving, warn that stopping it can be dangerous. Do not offer engine commands unprompted.",
@@ -57,6 +59,20 @@ async function openai(model: string, messages: Msg[]) {
 
 function minutesAgo(ts: number): number | null {
   return ts ? Math.max(0, Math.round((Date.now() / 1000 - ts) / 60)) : null;
+}
+
+async function deviceInfo(deviceId: number) {
+  const s = (await deviceStatuses([deviceId]).catch(() => []))[0];
+  if (!s) return "not available";
+  return {
+    battery_percent: s.battery ?? "not available",
+    gsm_signal_bars: s.signal === null ? "not available" : `${s.signal}/4`,
+    satellites: s.satellites ?? "not available",
+    connected_to_vehicle_power: s.charging ?? "not available",
+    engine_blocked_by_relay: s.blocked ?? "not available",
+    vehicle_voltage: s.voltage ?? "not available",
+    minutes_since_last_contact: s.lastReport ? Math.round((Date.now() - s.lastReport.getTime()) / 60_000) : "never",
+  };
 }
 
 export async function chat(input: { user: AiUser; conversationId: string | null; message: string; lang: Lang; deviceId: number | null; channel: Channel }): Promise<ChatResult> {
@@ -92,6 +108,7 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
         ignition: v.engine === null ? "unknown" : v.engine ? "on" : "off", address: v.address ?? "unknown",
         lat: v.lat, lng: v.lng, last_report: v.time, minutes_since_last_report: minutesAgo(v.timestamp), stopped_for: v.stopDuration,
         map_url: gps.mapUrl(v.lat, v.lng), street_view_url: gps.streetViewUrl(v.lat, v.lng),
+        gps_device: await deviceInfo(v.id),
       };
     },
     get_history: async ({ device_id, from, to }) => {
