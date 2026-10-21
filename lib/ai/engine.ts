@@ -44,19 +44,21 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
     "Customers may refer to a vehicle by its nickname, color, make, model or type (e.g. 'la jeepeta', 'el carro rojo', 'el Toyota'): pass those words as the list_vehicles search, and mention the nickname when you answer.",
     "Street View images are from Google and are not live; the location and speed are live.",
     "Engine stop/resume: only when the customer asks, and only through request_engine_command. Never say it was executed: tell the customer to confirm with their PIN. If the vehicle is moving, warn that stopping it can be dangerous. Do not offer engine commands unprompted.",
-    channel === "whatsapp" ? "This is WhatsApp: plain text, include links as plain URLs. To confirm an engine order the customer replies here with their PIN (never say app/web)." : "The app/web shows buttons for map, Street View and history, so you do not need to paste links.",
+    channel === "whatsapp" ? "This is WhatsApp: plain text, include links as plain URLs. To confirm an engine order the customer replies here with their PIN (never say app/web)."
+      : channel === "alexa" ? "This is a voice answer spoken by Alexa: 1-3 short sentences, no links, no lists, no markdown, no emojis; say numbers naturally. Mention only the GPS device values that are known (skip the unavailable ones) and only battery/signal when asked or when something is wrong. Engine stop/resume is not available by voice: if asked, only say it must be done in the app or web with the PIN; do not ask follow-up questions about it."
+      : "The app/web shows buttons for map, Street View and history, so you do not need to paste links.",
     "Do not answer questions unrelated to the customer's vehicles or GPS tracking; politely redirect.",
     deviceId ? `The vehicle currently open on screen has device_id ${deviceId}; "it" refers to that vehicle.` : "",
   ].filter(Boolean).join("\n");
 }
 
-async function openai(model: string, messages: Msg[]) {
+async function openai(model: string, messages: Msg[], tools: typeof TOOLS, effort: "minimal" | "low") {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY no configurada");
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: "auto", reasoning_effort: "low" }),
+    body: JSON.stringify({ model, messages, tools, tool_choice: "auto", reasoning_effort: effort }),
     signal: AbortSignal.timeout(45_000),
   });
   const data = await res.json().catch(() => ({}));
@@ -82,16 +84,8 @@ async function deviceInfo(deviceId: number) {
   };
 }
 
-export async function chat(input: { user: AiUser; conversationId: string | null; message: string; lang: Lang; deviceId: number | null; channel: Channel }): Promise<ChatResult> {
-  const { user, lang, channel } = input;
-  const setting = await aiSetting();
-  const config = await assistantConfig(user, lang);
-  let conversation = input.conversationId ? await prisma.aiConversation.findUnique({ where: { id: input.conversationId } }) : null;
-  if (conversation && conversation.gpswoxUserId !== user.userId) conversation = null;
-  const past: Msg[] = conversation ? (JSON.parse(conversation.messages) as Msg[]).slice(-MAX_HISTORY) : [];
-
-  const actions: AiAction[] = [];
-  let confirm: PendingConfirm | null = null;
+// Read-only vehicle tools, shared by the chat engine and the MCP connector (Gemini).
+export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => void = () => {}) {
   let cachedVehicles: gps.Vehicle[] | null = null;
   const fleet = async () => (cachedVehicles ??= await gps.vehicles(user.hash));
   const profileCache = new Map<number, VehicleProfile>();
@@ -104,9 +98,6 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
     return profileCache;
   };
   const find = async (id: number) => (await fleet()).find((v) => v.id === Number(id)) ?? null;
-  const addAction = (a: AiAction) => {
-    if (!actions.some((x) => x.type === a.type && x.device_id === a.device_id)) actions.push(a);
-  };
 
   const tools: Record<string, (args: Record<string, unknown>) => Promise<unknown>> = {
     list_vehicles: async ({ search }) => {
@@ -139,6 +130,26 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
       addAction({ type: "open_history", device_id: v.id, from: String(from).replace(" ", "T"), to: String(to).replace(" ", "T"), label: t(lang, "Ver historial", "Show history") });
       return { device_id: v.id, name: v.name, ...h };
     },
+  };
+  return { tools, find };
+}
+
+export async function chat(input: { user: AiUser; conversationId: string | null; message: string; lang: Lang; deviceId: number | null; channel: Channel }): Promise<ChatResult> {
+  const { user, lang, channel } = input;
+  const setting = await aiSetting();
+  const config = await assistantConfig(user, lang);
+  let conversation = input.conversationId ? await prisma.aiConversation.findUnique({ where: { id: input.conversationId } }) : null;
+  if (conversation && conversation.gpswoxUserId !== user.userId) conversation = null;
+  const past: Msg[] = conversation ? (JSON.parse(conversation.messages) as Msg[]).slice(-MAX_HISTORY) : [];
+
+  const actions: AiAction[] = [];
+  let confirm: PendingConfirm | null = null;
+  const addAction = (a: AiAction) => {
+    if (!actions.some((x) => x.type === a.type && x.device_id === a.device_id)) actions.push(a);
+  };
+  const { tools: readOnly, find } = readTools(user, lang, addAction);
+  const tools: Record<string, (args: Record<string, unknown>) => Promise<unknown>> = {
+    ...readOnly,
     request_engine_command: async ({ device_id, command }) => {
       const v = await find(Number(device_id));
       if (!v) return { error: "Vehicle not found among the customer's vehicles" };
@@ -150,12 +161,14 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
     },
   };
 
+  const voice = channel === "alexa";
+  if (voice) delete tools.request_engine_command;
   const messages: Msg[] = [{ role: "system", content: systemPrompt(config.name, config.companyName, lang, input.deviceId, channel) }, ...past, { role: "user", content: input.message }];
   let reply = "";
   let tokensIn = 0;
   let tokensOut = 0;
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const data = await openai(setting.model, messages);
+    const data = await openai(setting.model, messages, voice ? TOOLS.filter((x) => x.function.name !== "request_engine_command") : TOOLS, voice ? "minimal" : "low");
     tokensIn += data.usage?.prompt_tokens ?? 0;
     tokensOut += data.usage?.completion_tokens ?? 0;
     const msg = data.choices[0].message;

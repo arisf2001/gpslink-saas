@@ -6,7 +6,7 @@ import { ancestors, userIdByEmail } from "../gpswox";
 import * as gps from "./gps";
 
 export type Lang = "es" | "en";
-export type Channel = "app" | "web" | "whatsapp";
+export type Channel = "app" | "web" | "whatsapp" | "alexa";
 // userId 0 = GPS Link's own admin account (not in the client list).
 export type AiUser = { hash: string; userId: number; email: string; company: Company | null };
 

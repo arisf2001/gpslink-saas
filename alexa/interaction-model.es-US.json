@@ -1,0 +1,34 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "gps link",
+      "intents": [
+        {
+          "name": "PreguntaIntent",
+          "slots": [{ "name": "pregunta", "type": "AMAZON.SearchQuery" }],
+          "samples": [
+            "dónde está {pregunta}",
+            "dónde anda {pregunta}",
+            "en dónde está {pregunta}",
+            "cuánta batería tiene {pregunta}",
+            "cómo está {pregunta}",
+            "está encendido {pregunta}",
+            "qué velocidad lleva {pregunta}",
+            "cuánto recorrió {pregunta}",
+            "por dónde anduvo {pregunta}",
+            "pregúntale {pregunta}",
+            "quiero saber {pregunta}",
+            "dime {pregunta}",
+            "busca {pregunta}"
+          ]
+        },
+        { "name": "AMAZON.HelpIntent", "samples": [] },
+        { "name": "AMAZON.StopIntent", "samples": [] },
+        { "name": "AMAZON.CancelIntent", "samples": [] },
+        { "name": "AMAZON.FallbackIntent", "samples": [] },
+        { "name": "AMAZON.NavigateHomeIntent", "samples": [] }
+      ],
+      "types": []
+    }
+  }
+}

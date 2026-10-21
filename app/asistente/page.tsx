@@ -1,15 +1,20 @@
 import type { Metadata } from "next";
+import { resolveUser } from "@/lib/ai/assistant";
+import { resourceUrl } from "@/lib/mcp";
 import { getSession } from "@/lib/session";
 import { SiteNav } from "../site-nav";
 import { iaLogoutAction } from "./actions";
 import { AssistantChat } from "./chat";
 import { IaLogin } from "./login";
+import { VoiceConnect } from "./voice-connect";
 
 export const metadata: Metadata = { title: "Asistente IA | GPS Link" };
 
 export default async function AsistentePage({ searchParams }: { searchParams: Promise<{ embed?: string }> }) {
   const embed = (await searchParams).embed === "1";
-  const loggedIn = !!(await getSession("ia"));
+  const hash = await getSession("ia");
+  const loggedIn = !!hash;
+  const company = hash ? await resolveUser(hash).then((u) => u.company).catch(() => null) : null;
   return (
     <>
       {!embed && <SiteNav />}
@@ -17,6 +22,7 @@ export default async function AsistentePage({ searchParams }: { searchParams: Pr
         {loggedIn ? (
           <>
             <AssistantChat />
+            <VoiceConnect geminiUrl={resourceUrl(company?.subdomain ?? null)} alexaUrl={process.env.ALEXA_SKILL_URL || null} color={company?.brandColor || "#0F4C5C"} />
             <form action={iaLogoutAction} style={{ textAlign: "center", margin: "8px 0" }}>
               <input type="hidden" name="embed" value={embed ? "1" : ""} />
               <button className="linkbtn">Salir del asistente</button>

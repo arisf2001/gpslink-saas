@@ -382,3 +382,40 @@ model SignupVerification {
 
   @@index([email])
 }
+
+// OAuth 2.0 for voice/AI assistants (Gemini custom app via MCP, Alexa account linking).
+// The customer signs in with their GPS Link user/password; tokens map to their sealed user_api_hash.
+model OAuthClient {
+  id           String   @id @default(cuid())
+  clientId     String   @unique
+  secretHash   String?
+  name         String
+  redirectUris String   @db.Text
+  createdAt    DateTime @default(now())
+}
+
+model OAuthCode {
+  id          String   @id @default(cuid())
+  codeHash    String   @unique
+  clientId    String
+  redirectUri String   @db.Text
+  challenge   String?
+  sealedHash  String   @db.Text
+  brand       String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+}
+
+model OAuthToken {
+  id               String   @id @default(cuid())
+  accessHash       String   @unique
+  refreshHash      String   @unique
+  clientId         String
+  sealedHash       String   @db.Text
+  brand            String?
+  expiresAt        DateTime
+  refreshExpiresAt DateTime
+  createdAt        DateTime @default(now())
+
+  @@index([clientId])
+}
