@@ -9,7 +9,6 @@ datasource db {
 
 enum PlanCategory {
   WHITE_LABEL
-  RENTAL
   FLEET
 }
 

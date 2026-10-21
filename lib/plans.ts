@@ -2,7 +2,7 @@ import type { PlanCategory } from "@prisma/client";
 import { prisma } from "./db";
 import { CATEGORY_LABELS } from "./format";
 
-export const PACKAGE_SIZES = [20, 50, 100, 300, 400, 500, 1000] as const;
+export const PACKAGE_SIZES = [50, 100, 300, 400, 500, 1000] as const;
 
 export const DEFAULT_FEATURES = [
   "Tu marca: logo, colores y nombre",

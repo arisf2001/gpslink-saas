@@ -15,7 +15,6 @@ export function parseMoneyToCents(value: string): number | null {
 
 export const CATEGORY_LABELS = {
   WHITE_LABEL: "Marca blanca",
-  RENTAL: "Dealers de renta de vehículos",
   FLEET: "Flotas y empresas",
 } as const;
 
