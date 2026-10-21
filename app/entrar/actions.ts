@@ -4,8 +4,8 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { rateLimit, resolveUser } from "@/lib/ai/assistant";
 import { login } from "@/lib/ai/gps";
-import { trackerUrl } from "@/lib/config";
 import { trackSsoToken } from "@/lib/track-sso";
+import { platformOriginFor } from "@/lib/brand-web";
 
 export type TrackLoginState = { error?: string; email?: string };
 
@@ -19,5 +19,5 @@ export async function trackLoginAction(_prev: TrackLoginState, formData: FormDat
   if (!hash) return { error: "Correo o contraseña incorrectos.", email };
   const user = await resolveUser(hash).catch(() => null);
   if (!user?.userId) return { error: "No pudimos entrar ahora. Inténtalo otra vez.", email };
-  redirect(`${trackerUrl()}/gpslink-sso?t=${encodeURIComponent(trackSsoToken(user.userId))}`);
+  redirect(`${await platformOriginFor(user.userId)}/gpslink-sso?t=${encodeURIComponent(trackSsoToken(user.userId))}`);
 }

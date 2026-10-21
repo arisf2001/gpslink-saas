@@ -1,8 +1,9 @@
 import { rateLimit, resolveUser } from "@/lib/ai/assistant";
 import { login } from "@/lib/ai/gps";
-import { appUrl, trackerUrl } from "@/lib/config";
+import { appUrl } from "@/lib/config";
 import { prisma } from "@/lib/db";
 import { trackSsoToken } from "@/lib/track-sso";
+import { platformOriginFor } from "@/lib/brand-web";
 
 // Target of the login box that white labels paste on their own website.
 export async function POST(req: Request) {
@@ -23,5 +24,5 @@ export async function POST(req: Request) {
   if (!hash) return back("1");
   const user = await resolveUser(hash).catch(() => null);
   if (!user?.userId) return back("3");
-  return Response.redirect(`${trackerUrl()}/gpslink-sso?t=${encodeURIComponent(trackSsoToken(user.userId))}`, 303);
+  return Response.redirect(`${await platformOriginFor(user.userId)}/gpslink-sso?t=${encodeURIComponent(trackSsoToken(user.userId))}`, 303);
 }
