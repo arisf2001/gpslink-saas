@@ -8,6 +8,51 @@ import { PlanTabs, type PublicPlan } from "./plan-tabs";
 
 export const dynamic = "force-dynamic";
 
+const FEATURE_GROUPS = [
+  {
+    title: "Tu marca",
+    items: [
+      "Plataforma web con tu logo, colores y nombre, gratis (incluida en todos los paquetes)",
+      "Tu propio subdominio (o tu dominio)",
+      "App móvil para Android y iPhone con tu marca, gratis (incluida en todos los paquetes)",
+      "Correos y avisos a tus clientes con tu nombre",
+    ],
+  },
+  {
+    title: "Tu negocio",
+    items: [
+      "Crea y administra a tus clientes",
+      "Crea tus propios paquetes y precios, desde 1 equipo",
+      "Cobra a tu manera: WhatsApp, Azul, depósito o efectivo",
+      "Crea dealers y subdistribuidores con su propia marca",
+      "Usuarios con permisos para tu equipo de trabajo",
+      "Fecha de vencimiento por cliente y por equipo",
+    ],
+  },
+  {
+    title: "Rastreo para tus clientes",
+    items: [
+      "Ubicación en tiempo real en el mapa",
+      "Historial y reproducción de rutas",
+      "Alertas de velocidad, encendido, geocercas y SOS",
+      "Geocercas y puntos de interés",
+      "Apagado y encendido de motor a distancia",
+      "Reportes de kilómetros, paradas, viajes y horas de motor",
+      "Sensores de combustible, temperatura y más",
+      "Compatible con GT06 y cientos de modelos de GPS",
+    ],
+  },
+  {
+    title: "Nosotros nos encargamos",
+    items: [
+      "Servidores, seguridad y mantenimiento",
+      "Soporte técnico de GPS Link",
+      "Bloques de 10 equipos cuando necesites crecer",
+      "Cada equipo cuenta su año desde que lo agregas",
+    ],
+  },
+];
+
 export default async function Home() {
   await ensureDefaultPlans();
   const plans = await prisma.plan.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { devices: "asc" }] });
@@ -36,9 +81,9 @@ export default async function Home() {
             </h1>
             <p>Vende rastreo satelital con tu nombre, tu logo y tu app. Nosotros ponemos los servidores; tú pones los clientes.</p>
             <ul>
-              <li>Tu logo, colores y nombre</li>
-              <li>App móvil para tus clientes</li>
-              <li>Crea tus propios paquetes y precios</li>
+              <li>Plataforma web con tu marca, gratis</li>
+              <li>App móvil con tu marca, gratis</li>
+              <li>Vende paquetes desde 1 equipo</li>
               <li>Crea dealers con su propia marca</li>
               <li>Cobra a tus clientes a tu manera</li>
               <li>Apagado de motor, alertas e historial</li>
@@ -57,6 +102,21 @@ export default async function Home() {
           <h2>Planes</h2>
           <div className="sub">Pago anual. Paquetes por equipo GPS.</div>
           <PlanTabs plans={publicPlans} labels={CATEGORY_LABELS} trialMonths={months} blockPrices={blockPrices} />
+        </div>
+      </section>
+
+      <section className="feats" id="funciones">
+        <div className="wrap">
+          <h2>Todo lo que puedes hacer con tu marca blanca</h2>
+          <div className="sub">Todos los paquetes incluyen todas las funciones. Solo cambia la cantidad de equipos.</div>
+          <div className="fgrid">
+            {FEATURE_GROUPS.map((g) => (
+              <div key={g.title} className="fcard">
+                <b>{g.title}</b>
+                <ul>{g.items.map((i) => <li key={i}>{i}</li>)}</ul>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 

@@ -5,12 +5,13 @@ import { CATEGORY_LABELS } from "./format";
 export const PACKAGE_SIZES = [50, 100, 300, 400, 500, 1000] as const;
 
 export const DEFAULT_FEATURES = [
-  "Tu marca: logo, colores y nombre",
-  "Panel para administrar tus clientes",
-  "Crea tus propios paquetes y precios",
-  "Dealers con su propia marca",
-  "App móvil con tu marca",
-  "Alertas, geocercas, historial y comandos",
+  "Plataforma web con tu marca, gratis",
+  "App móvil con tu marca, gratis",
+  "Crea tus clientes y dealers con su marca",
+  "Vende desde 1 equipo con tus precios",
+  "Cobra a tus clientes a tu manera",
+  "Rastreo en vivo, rutas, alertas y reportes",
+  "Apagado de motor a distancia",
 ].join("\n");
 
 // Prices start at $0 on purpose: the owner sets real prices from /admin before going live.

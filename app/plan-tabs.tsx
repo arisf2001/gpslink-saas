@@ -28,6 +28,7 @@ export function PlanTabs({ plans, labels, trialMonths, blockPrices }: { plans: P
 
   return (
     <>
+      {categories.length > 1 && (
       <div className="tabs" role="tablist">
         {categories.map((c) => (
           <button key={c} type="button" role="tab" aria-selected={c === active} className={`tab${c === active ? " on" : ""}`} onClick={() => setActive(c)}>
@@ -35,6 +36,7 @@ export function PlanTabs({ plans, labels, trialMonths, blockPrices }: { plans: P
           </button>
         ))}
       </div>
+      )}
       <div className="free">{trialMonths} meses gratis para probar, sin tarjeta. Después eliges tu paquete.</div>
       <div className="grid">
         {visible.map((p) => (

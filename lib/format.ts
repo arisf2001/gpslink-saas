@@ -15,7 +15,6 @@ export function parseMoneyToCents(value: string): number | null {
 
 export const CATEGORY_LABELS = {
   WHITE_LABEL: "Marca blanca",
-  FLEET: "Flotas y empresas",
 } as const;
 
 export const METHOD_LABELS: Record<string, string> = {
