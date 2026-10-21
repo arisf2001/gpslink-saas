@@ -66,6 +66,9 @@ model Company {
   invoices             Invoice[]
   notifications        Notification[]
   devices              BilledDevice[]
+  aiEnabled            Boolean        @default(false)
+  aiName               String?
+  brandColor           String?
   clientPlans          ClientPlan[]
   endClients           EndClient[]
 }
@@ -95,6 +98,7 @@ model Invoice {
   newDevices     Int
   renewals       Int
   unitPriceCents Int
+  aiCents        Int       @default(0)
   amountCents    Int
   currency       String    @default("usd")
   status         String    @default("OPEN")
@@ -200,4 +204,68 @@ model MockClient {
   groupId   Int      @default(2)
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
+}
+
+model AiSetting {
+  id                Int      @id @default(1)
+  enabled           Boolean  @default(false)
+  monthlyPriceCents Int      @default(0)
+  model             String   @default("gpt-5-mini")
+  updatedAt         DateTime @updatedAt
+}
+
+model AiAppKey {
+  id        String    @id @default(cuid())
+  name      String
+  prefix    String
+  keyHash   String    @unique
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+}
+
+model AiConversation {
+  id           String   @id @default(cuid())
+  gpswoxUserId Int
+  companyId    String?
+  channel      String
+  messages     String   @db.LongText
+  turns        Int      @default(0)
+  tokensIn     Int      @default(0)
+  tokensOut    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([companyId, createdAt])
+}
+
+model AiPin {
+  gpswoxUserId Int       @id
+  pinHash      String
+  failed       Int       @default(0)
+  lockedUntil  DateTime?
+  updatedAt    DateTime  @updatedAt
+}
+
+model AiConfirm {
+  id           String    @id
+  gpswoxUserId Int
+  deviceId     Int
+  deviceName   String
+  command      String
+  expiresAt    DateTime
+  usedAt       DateTime?
+  createdAt    DateTime  @default(now())
+}
+
+model AiCommandLog {
+  id           String   @id @default(cuid())
+  gpswoxUserId Int
+  companyId    String?
+  deviceId     Int
+  deviceName   String
+  command      String
+  channel      String
+  ok           Boolean
+  error        String?  @db.Text
+  createdAt    DateTime @default(now())
 }

@@ -132,17 +132,18 @@ export async function createInvoice(company: Company, now = new Date()) {
   if (company.createdAt >= period.end) return null;
   if (await prisma.invoice.findUnique({ where: { companyId_periodStart: { companyId: company.id, periodStart: period.start } } })) return null;
   const devices = await prisma.billedDevice.findMany({ where: { companyId: company.id } });
-  const { items, newDevices, renewals } = devicesToBill(devices, period.end);
-  if (!items.length) return null;
+  const found = devicesToBill(devices, period.end);
   const tiers = await prisma.priceTier.findMany();
-  const unit = unitPrice(tiers, devices.filter((d) => !d.removedAt).length);
-  if (unit <= 0) {
-    console.warn(`[factura] ${company.id}: no hay precio para este tramo; no se factura hasta que se configure.`);
-    return null;
-  }
+  const unit = found.items.length ? unitPrice(tiers, devices.filter((d) => !d.removedAt).length) : 0;
+  if (found.items.length && unit <= 0) console.warn(`[factura] ${company.id}: no hay precio para este tramo; los equipos no se facturan hasta que se configure.`);
+  const items = unit > 0 ? found.items : [];
+  const { newDevices, renewals } = unit > 0 ? found : { newDevices: 0, renewals: 0 };
+  const setting = company.aiEnabled ? await prisma.aiSetting.findUnique({ where: { id: 1 } }) : null;
+  const aiCents = setting && company.trialEndsAt < period.end ? setting.monthlyPriceCents : 0;
+  if (!items.length && aiCents <= 0) return null;
   const invoice = await prisma.$transaction(async (tx) => {
     const created = await tx.invoice.create({
-      data: { companyId: company.id, periodStart: period.start, periodEnd: period.end, dueAt: period.dueAt, devices: items.length, newDevices, renewals, unitPriceCents: unit, amountCents: unit * items.length },
+      data: { companyId: company.id, periodStart: period.start, periodEnd: period.end, dueAt: period.dueAt, devices: items.length, newDevices, renewals, unitPriceCents: unit, aiCents, amountCents: unit * items.length + aiCents },
     });
     for (const d of items) await tx.billedDevice.update({ where: { id: d.id }, data: { nextBillAt: plusOneYear(d.nextBillAt) } });
     return created;
@@ -151,7 +152,8 @@ export async function createInvoice(company: Company, now = new Date()) {
     subject: `Tu factura de GPS Link: ${formatMoney(invoice.amountCents, invoice.currency)}`,
     title: "Tu factura del mes está lista",
     lines: [
-      `${invoice.devices} ${invoice.devices === 1 ? "equipo" : "equipos"} (${newDevices} nuevos, ${renewals} renovaciones) a ${formatMoney(unit, invoice.currency)} por año cada uno.`,
+      ...(invoice.devices ? [`${invoice.devices} ${invoice.devices === 1 ? "equipo" : "equipos"} (${newDevices} nuevos, ${renewals} renovaciones) a ${formatMoney(unit, invoice.currency)} por año cada uno.`] : []),
+      ...(aiCents ? [`Asistente IA del mes: ${formatMoney(aiCents, invoice.currency)}.`] : []),
       `Total: ${formatMoney(invoice.amountCents, invoice.currency)}. Puedes pagar hasta el ${formatDate(new Date(invoice.dueAt.getTime() - DAY_MS))}.`,
     ],
     cta: { label: "Pagar mi factura", url: `${appUrl()}/cuenta` },

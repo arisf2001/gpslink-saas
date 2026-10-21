@@ -228,3 +228,46 @@ export async function setDeviceExpiration(deviceId: number, expiresAt: Date): Pr
   if (isMock()) return;
   await call("POST", `device/${deviceId}/expiration`, { expiration_date: gpswoxDate(expiresAt) });
 }
+
+// The user itself and its managers up to the top, nearest first. Read-only access to the GPSWOX database.
+export async function ancestors(userId: number): Promise<number[]> {
+  const chain = [userId];
+  if (isMock()) {
+    let current = await prisma.mockClient.findUnique({ where: { id: userId } });
+    while (current && chain.length < 12) {
+      chain.push(current.managerId);
+      current = await prisma.mockClient.findUnique({ where: { id: current.managerId } });
+    }
+    return chain;
+  }
+  return withGpswoxDb(async (conn) => {
+    let id: number | null = userId;
+    while (id !== null && chain.length < 12) {
+      const [rows]: [RowDataPacket[], unknown] = await conn.query<RowDataPacket[]>("SELECT manager_id FROM users WHERE id = ?", [id]);
+      const manager: number | null = rows[0]?.manager_id ? Number(rows[0].manager_id) : null;
+      if (manager !== null && !chain.includes(manager)) chain.push(manager);
+      id = manager !== null && chain.length < 12 ? manager : null;
+    }
+    return chain;
+  });
+}
+
+let emailIndex: { at: number; map: Map<string, number> } | null = null;
+
+// GPSWOX user id for an email, from the admin client list (cached for 10 minutes).
+export async function userIdByEmail(email: string): Promise<number | null> {
+  const key = email.trim().toLowerCase();
+  if (isMock()) return (await prisma.mockClient.findFirst({ where: { email: key } }))?.id ?? null;
+  if (!emailIndex || Date.now() - emailIndex.at > 10 * 60_000 || !emailIndex.map.has(key)) {
+    const map = new Map<string, number>();
+    const limit = 500;
+    for (let page = 1; page <= 100; page++) {
+      const data = await call("GET", "clients", { limit: String(limit), page: String(page) });
+      const items = (data.data ?? []) as { id: number; email: string }[];
+      for (const u of items) map.set(String(u.email).toLowerCase(), Number(u.id));
+      if (items.length < limit) break;
+    }
+    emailIndex = { at: Date.now(), map };
+  }
+  return emailIndex.map.get(key) ?? null;
+}

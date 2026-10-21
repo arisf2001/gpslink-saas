@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 
-type Role = "admin" | "company";
+type Role = "admin" | "company" | "ia";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
 function secret(): string {
@@ -35,7 +35,7 @@ export function verifyToken(token: string | undefined, role: Role, now = Date.no
   }
 }
 
-const cookieName = (role: Role) => (role === "admin" ? "gl_admin" : "gl_company");
+const cookieName = (role: Role) => (role === "admin" ? "gl_admin" : role === "ia" ? "gl_ia" : "gl_company");
 
 export async function setSession(role: Role, subject: string) {
   (await cookies()).set(cookieName(role), createToken(role, subject), {
