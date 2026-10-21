@@ -1,3 +1,4 @@
+import { trackerUrl } from "@/lib/config";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { TRIAL_DAYS } from "@/lib/config";
@@ -81,7 +82,7 @@ export default async function Home() {
             <Link href="#planes" className="btn">Empezar {months} meses gratis</Link>
             &nbsp;&nbsp;
             <Link href="#como-funciona" className="btn o">Cómo funciona</Link>
-            <TrackLoginForm compact />
+            <TrackLoginForm compact googleUrl={`${trackerUrl()}/google/login`} />
           </div>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img className="ph" src="/phone.png" alt="App de rastreo GPS" />

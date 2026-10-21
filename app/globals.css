@@ -107,3 +107,6 @@ table.t input{font:inherit;padding:6px 8px;border:1.5px solid #d1d5db;border-rad
 .trackbox.compact b,.trackbox.compact .err,.trackbox.compact .btn{grid-column:1/-1}
 .trackbox .err{color:var(--r);font-size:14px;margin:0}
 @media(max-width:640px){.trackbox.compact{grid-template-columns:1fr}}
+.btn.google{background:#fff;color:#1f2937;border:1.5px solid #d1d5db;display:flex;align-items:center;justify-content:center;gap:10px}
+.btn.google:hover{background:#f9fafb}
+.trackbox.compact .btn.google{grid-column:1/-1}

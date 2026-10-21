@@ -1,3 +1,4 @@
+import { trackerUrl } from "@/lib/config";
 import { SiteNav } from "../site-nav";
 import { TrackLoginForm } from "./form";
 
@@ -8,7 +9,7 @@ export default function EntrarPage() {
     <>
       <SiteNav />
       <main className="wrap" style={{ maxWidth: 420, padding: "50px 20px" }}>
-        <TrackLoginForm />
+        <TrackLoginForm googleUrl={`${trackerUrl()}/google/login`} />
       </main>
     </>
   );
