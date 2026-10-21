@@ -109,6 +109,24 @@ export default async function Home() {
         </div>
       </section>
 
+      <section className="appshow">
+        <div className="wrap appshow-in">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/app-gpslink.jpg" alt="App de rastreo GPS con mapa, velocidad y vista de la calle" width={720} height={624} />
+          <div>
+            <h2>App móvil con tu marca, gratis</h2>
+            <p>Tus clientes ven sus vehículos en tiempo real desde Android y iPhone, con el logo y los colores de tu empresa.</p>
+            <ul>
+              <li>Ubicación en vivo en el mapa</li>
+              <li>Velocidad al instante</li>
+              <li>Vista de la calle con Google Maps</li>
+              <li>Historial de rutas, alertas y apagado de motor</li>
+            </ul>
+            <a href="/registro" className="btn">Empezar gratis</a>
+          </div>
+        </div>
+      </section>
+
       <section className="how" id="como-funciona">
         <div className="wrap">
           <h2>Cómo funciona</h2>
