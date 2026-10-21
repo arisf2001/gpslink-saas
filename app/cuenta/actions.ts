@@ -6,7 +6,7 @@ import { rateLimit } from "@/lib/ai/assistant";
 import { prisma } from "@/lib/db";
 import { appUrl } from "@/lib/config";
 import { verifyCompanyLogin, verifyResellerLogin } from "@/lib/companies";
-import { clearSession, getSession, setSession } from "@/lib/session";
+import { adminCredentialsMatch, clearSession, getSession, setSession } from "@/lib/session";
 import { getStripe } from "@/lib/stripe";
 
 export type LoginState = { error?: string };
@@ -17,6 +17,10 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   if (!email || !password) return { error: "Escribe tu correo y tu contraseña." };
   const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
   if (rateLimit(`cuenta-login:${ip}`, 10) > 0 || rateLimit(`cuenta-login:${email}`, 5) > 0) return { error: "Demasiados intentos. Espera un minuto." };
+  if (adminCredentialsMatch(email, password)) {
+    await setSession("admin", "owner");
+    redirect("/admin");
+  }
   const company = (await verifyCompanyLogin(email, password)) ?? (await verifyResellerLogin(email, password).catch((error) => {
     console.error("[cuenta] login GPS Link:", (error as Error).message);
     return null;
