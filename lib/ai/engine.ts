@@ -2,6 +2,12 @@ import { prisma } from "../db";
 import { aiSetting, assistantConfig, createConfirm, hasPin, t, type AiUser, type Channel, type Lang, type PendingConfirm } from "./assistant";
 import * as gps from "./gps";
 import { deviceStatuses } from "../device-status";
+import { colorName, matchesVehicle, typeName, vehicleProfiles, type VehicleProfile } from "../vehicle-profile";
+
+const describe = (p: VehicleProfile | undefined) =>
+  p && Object.values(p).some(Boolean)
+    ? { nickname: p.nickname, make: p.brand, model: p.model, year: p.year, color: colorName(p.color), vehicle_type: typeName(p.type) }
+    : {};
 
 export type AiAction =
   | { type: "open_map"; device_id: number; lat: number; lng: number; label: string; url: string }
@@ -17,7 +23,7 @@ const MAX_HISTORY = 12;
 const MAX_ROUNDS = 6;
 
 const TOOLS = [
-  { type: "function", function: { name: "list_vehicles", description: "List the customer's vehicles with status. Use it to find a vehicle by name or plate.", parameters: { type: "object", properties: { search: { type: "string", description: "Optional name or plate filter" } }, additionalProperties: false } } },
+  { type: "function", function: { name: "list_vehicles", description: "List the customer's vehicles with status, make, model, year, color, type and nickname. Use it to find a vehicle by name, plate, nickname, color, make, model or type (e.g. 'la jeepeta', 'el carro rojo', 'el Toyota').", parameters: { type: "object", properties: { search: { type: "string", description: "Optional filter: name, plate, nickname, color, make, model or type, in the customer's words" } }, additionalProperties: false } } },
   { type: "function", function: { name: "get_vehicle", description: "Current location, address, speed, ignition and last report of one vehicle.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
   { type: "function", function: { name: "get_history", description: "Trips summary for a vehicle between two local datetimes (America/Santo_Domingo): distance, top speed, moving/stopped time and stops.", parameters: { type: "object", properties: { device_id: { type: "integer" }, from: { type: "string", description: "YYYY-MM-DD HH:MM" }, to: { type: "string", description: "YYYY-MM-DD HH:MM" } }, required: ["device_id", "from", "to"], additionalProperties: false } } },
   { type: "function", function: { name: "request_engine_command", description: "Prepare an engine stop or resume. It does NOT execute: the customer must confirm with their PIN in the app/web.", parameters: { type: "object", properties: { device_id: { type: "integer" }, command: { type: "string", enum: ["engine_stop", "engine_resume"] } }, required: ["device_id", "command"], additionalProperties: false } } },
@@ -35,6 +41,7 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
     "Be brief and concrete (2-4 short sentences). Include the address, speed, whether the ignition is on/off when known and how long ago the last report was.",
     "When you describe one vehicle, add one short line with its GPS device status from gps_device: battery %, GSM signal (x/4), satellites, whether it is connected to the vehicle power and whether the engine is blocked. Say \"no disponible\" for missing values; never invent them. If it is not connected to the vehicle power, point it out.",
     "When several vehicles match, ask which one. If the customer has only one vehicle, use it.",
+    "Customers may refer to a vehicle by its nickname, color, make, model or type (e.g. 'la jeepeta', 'el carro rojo', 'el Toyota'): pass those words as the list_vehicles search, and mention the nickname when you answer.",
     "Street View images are from Google and are not live; the location and speed are live.",
     "Engine stop/resume: only when the customer asks, and only through request_engine_command. Never say it was executed: tell the customer to confirm with their PIN. If the vehicle is moving, warn that stopping it can be dangerous. Do not offer engine commands unprompted.",
     channel === "whatsapp" ? "This is WhatsApp: plain text, include links as plain URLs. To confirm an engine order the customer replies here with their PIN (never say app/web)." : "The app/web shows buttons for map, Street View and history, so you do not need to paste links.",
@@ -87,6 +94,15 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
   let confirm: PendingConfirm | null = null;
   let cachedVehicles: gps.Vehicle[] | null = null;
   const fleet = async () => (cachedVehicles ??= await gps.vehicles(user.hash));
+  const profileCache = new Map<number, VehicleProfile>();
+  const profilesFor = async (ids: number[]) => {
+    const missing = ids.filter((id) => !profileCache.has(id));
+    if (missing.length) {
+      const got = await vehicleProfiles(missing);
+      for (const id of missing) profileCache.set(id, got.get(id) ?? { brand: null, model: null, year: null, color: null, type: null, nickname: null });
+    }
+    return profileCache;
+  };
   const find = async (id: number) => (await fleet()).find((v) => v.id === Number(id)) ?? null;
   const addAction = (a: AiAction) => {
     if (!actions.some((x) => x.type === a.type && x.device_id === a.device_id)) actions.push(a);
@@ -94,9 +110,10 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
 
   const tools: Record<string, (args: Record<string, unknown>) => Promise<unknown>> = {
     list_vehicles: async ({ search }) => {
-      const q = String(search ?? "").toLowerCase().trim();
-      const list = (await fleet()).filter((v) => !q || v.name.toLowerCase().includes(q) || (v.plate ?? "").toLowerCase().includes(q));
-      return { total: list.length, vehicles: list.slice(0, 40).map((v) => ({ device_id: v.id, name: v.name, plate: v.plate, status: v.online, speed: `${v.speed} ${v.speedUnit}`, address: v.address })) };
+      const all = await fleet();
+      const profiles = await profilesFor(all.map((v) => v.id));
+      const list = all.filter((v) => matchesVehicle(String(search ?? ""), v, profiles.get(v.id)));
+      return { total: list.length, vehicles: list.slice(0, 40).map((v) => ({ device_id: v.id, name: v.name, plate: v.plate, ...describe(profiles.get(v.id)), status: v.online, speed: `${v.speed} ${v.speedUnit}`, address: v.address })) };
     },
     get_vehicle: async ({ device_id }) => {
       const v = await find(Number(device_id));
@@ -104,7 +121,7 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
       addAction({ type: "open_map", device_id: v.id, lat: v.lat, lng: v.lng, label: t(lang, "Ver en el mapa", "Show on map"), url: gps.mapUrl(v.lat, v.lng) });
       addAction({ type: "street_view", device_id: v.id, lat: v.lat, lng: v.lng, url: gps.streetViewUrl(v.lat, v.lng), label: t(lang, "Vista de la calle", "Street view") });
       return {
-        device_id: v.id, name: v.name, plate: v.plate, status: v.online, speed: `${v.speed} ${v.speedUnit}`,
+        device_id: v.id, name: v.name, plate: v.plate, ...describe((await profilesFor([v.id])).get(v.id)), status: v.online, speed: `${v.speed} ${v.speedUnit}`,
         ignition: v.engine === null ? "unknown" : v.engine ? "on" : "off", address: v.address ?? "unknown",
         lat: v.lat, lng: v.lng, last_report: v.time, minutes_since_last_report: minutesAgo(v.timestamp), stopped_for: v.stopDuration,
         map_url: gps.mapUrl(v.lat, v.lng), street_view_url: gps.streetViewUrl(v.lat, v.lng),
