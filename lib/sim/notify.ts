@@ -18,9 +18,13 @@ export const payUrl = (r: Pick<SimRenewal, "token">) => `${appUrl()}/sim/pagar/$
 // Expired or suspended SIMs also pay the reactivation fee of their carrier.
 export async function quote(card: SimCard, now = new Date()) {
   const carrier = await prisma.simCarrier.findUnique({ where: { code: card.carrierCode } });
-  if (!carrier || carrier.renewCents <= 0) return null;
+  if (!carrier) return null;
   const reactivation = card.status === 3 || (!!card.expiresAt && card.expiresAt <= now);
-  return { carrier, reactivation, amountCents: carrier.renewCents + (reactivation ? carrier.reactivateCents : 0), currency: carrier.currency };
+  const agency = !!card.companyId;
+  const renew = agency ? carrier.agencyRenewCents : carrier.renewCents;
+  if (renew <= 0) return null;
+  const react = agency ? carrier.agencyReactivateCents : carrier.reactivateCents;
+  return { carrier, agency, reactivation, amountCents: renew + (reactivation ? react : 0), currency: carrier.currency };
 }
 
 export async function ensureRenewal(card: SimCard, now = new Date()): Promise<SimRenewal | null> {
@@ -48,7 +52,10 @@ async function noticeOnce(iccid: string, kind: string, dedupeKey: string, send: 
   return true;
 }
 
-function toClient(card: SimCard, subject: string, title: string, lines: string[], cta?: { label: string; url: string }): Promise<ChannelResult[]> {
+// Agency SIMs are billed to the white-label company; direct SIMs to the vehicle owner.
+async function toClient(card: SimCard, subject: string, title: string, lines: string[], cta?: { label: string; url: string }): Promise<ChannelResult[]> {
+  const company = card.companyId ? await prisma.company.findUnique({ where: { id: card.companyId } }) : null;
+  if (card.companyId) card = { ...card, ownerEmail: company?.email ?? null, ownerPhone: company?.phone ?? null };
   const text = [`*${title}*`, ...lines, cta?.url ?? ""].filter(Boolean).join("\n");
   return Promise.all([
     card.ownerEmail ? sendEmail(card.ownerEmail, subject, emailHtml(title, lines, cta)) : Promise.resolve<ChannelResult>({ channel: "email", ok: false, error: "sin correo" }),

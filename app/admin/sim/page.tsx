@@ -30,7 +30,7 @@ function Days({ card, now }: { card: SimCard; now: Date }) {
   return <span style={{ color, fontWeight: 700, whiteSpace: "nowrap" }}>{d <= 0 ? "Vencida" : `${d} ${d === 1 ? "día" : "días"}`}</span>;
 }
 
-function SimTable({ cards, now }: { cards: SimCard[]; now: Date }) {
+function SimTable({ cards, now, agencies }: { cards: SimCard[]; now: Date; agencies: Map<string, string> }) {
   return (
     <table className="t">
       <thead><tr><th>ICCID</th><th>Estado</th><th>Vehículo · cliente</th><th>Plan · uso</th><th>Vence</th><th>Le quedan</th></tr></thead>
@@ -40,7 +40,7 @@ function SimTable({ cards, now }: { cards: SimCard[]; now: Date }) {
           <tr key={c.iccid}>
             <td><a href={`https://web.telebay.cn/#/?iccid=${c.iccid}&lang=es`} target="_blank" rel="noreferrer">{c.iccid}</a><div className="hint">{c.country ?? ""}</div></td>
             <td>{statusLabel(c.status)}</td>
-            <td>{c.deviceName ?? <span className="hint">Sin equipo</span>}<div className="hint">{c.ownerEmail ?? ""}</div></td>
+            <td>{c.deviceName ?? <span className="hint">Sin equipo</span>}<div className="hint">{c.companyId ? `Agencia: ${agencies.get(c.companyId) ?? ""}` : c.deviceId ? "Cliente directo" : ""}{c.ownerEmail ? ` · ${c.ownerEmail}` : ""}</div></td>
             <td>{c.packageName ?? "—"}<div className="hint">{c.usedMb.toFixed(2)} de {c.totalMb} MB</div></td>
             <td>{c.expiresAt ? formatDate(c.expiresAt) : "—"}</td>
             <td><Days card={c} now={now} /></td>
@@ -59,6 +59,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
   const all = await prisma.simCard.findMany({ where: { goneAt: null }, orderBy: [{ expiresAt: "asc" }, { iccid: "asc" }] });
   const report = await dailyReportData(now);
   const pending = await prisma.simRenewal.findMany({ where: { status: "PAID" }, orderBy: { paidAt: "asc" } });
+  const agencies = new Map((await prisma.company.findMany({ select: { id: true, name: true } })).map((c) => [c.id, c.name]));
   const lastSync = all.reduce<Date | null>((m, c) => (!m || c.lastSyncAt > m ? c.lastSyncAt : m), null);
   const search = q.trim();
   const filtered = search ? all.filter((c) => [c.iccid, c.msisdn, c.deviceName, c.ownerEmail].some((v) => v?.toLowerCase().includes(search.toLowerCase()))) : all;
@@ -103,7 +104,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
       {(f === "todas" || f === "vencer") && (
         <div className="panel">
           {f === "todas" && <form className="row" style={{ marginBottom: 10 }}><input type="hidden" name="f" value="todas" /><input name="q" defaultValue={q} placeholder="Buscar ICCID, número, vehículo o correo" style={{ maxWidth: 360 }} /><button className="btn sm">Buscar</button></form>}
-          <SimTable cards={f === "vencer" ? [...report.expired, ...report.soon] : filtered} now={now} />
+          <SimTable cards={f === "vencer" ? [...report.expired, ...report.soon] : filtered} now={now} agencies={agencies} />
         </div>
       )}
 
@@ -137,33 +138,35 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
             <input name="deviceId" placeholder="ID del equipo" inputMode="numeric" style={{ width: 130 }} />
             <button className="btn sm">Unir</button>
           </form>
-          <SimTable cards={report.noDevice} now={now} />
+          <SimTable cards={report.noDevice} now={now} agencies={agencies} />
         </div>
       )}
 
       {f === "precios" && (
         <div className="panel">
-          <p className="hint" style={{ marginBottom: 10 }}>Precios por año para el cliente. La reactivación se suma cuando la SIM ya venció o está suspendida. La compañía se reconoce por el comienzo del ICCID.</p>
+          <p className="hint" style={{ marginBottom: 10 }}>Precios por año. <b>Público:</b> tus clientes directos de track.gpslinkusa.com. <b>Agencia:</b> lo que paga la marca blanca por las SIM de sus equipos. La reactivación se suma cuando la SIM ya venció o está suspendida. La compañía se reconoce por el comienzo del ICCID.</p>
           <table className="t">
-            <thead><tr><th>Compañía</th><th>Comienzo del ICCID · renovación al año · reactivación (USD)</th></tr></thead>
+            <thead><tr><th>Compañía</th><th>Precios en USD</th></tr></thead>
             <tbody>
               {carriers.map((c) => (
                 <tr key={c.code}>
                   <td><b>{c.name}</b><div className="hint">{all.filter((s) => s.carrierCode === c.code).length} SIM</div></td>
                   <td>
-                    <form action={saveCarrierAction} className="row">
+                    <form action={saveCarrierAction} className="row" style={{ alignItems: "flex-end" }}>
                       <input type="hidden" name="code" value={c.code} />
-                      <input name="prefixes" defaultValue={c.iccidPrefixes} aria-label="Comienzo del ICCID" style={{ width: 130 }} />
-                      <input name="renew" defaultValue={(c.renewCents / 100).toString()} inputMode="decimal" aria-label="Renovación al año" style={{ width: 100 }} />
-                      <input name="reactivate" defaultValue={(c.reactivateCents / 100).toString()} inputMode="decimal" aria-label="Reactivación" style={{ width: 100 }} />
-                      <button className="btn sm">Guardar</button>
+                      <label style={{ fontSize: 13 }}>Comienzo del ICCID<input name="prefixes" defaultValue={c.iccidPrefixes} style={{ width: 120 }} /></label>
+                      <label style={{ fontSize: 13 }}>Público: renovación/año<input name="renew" defaultValue={(c.renewCents / 100).toString()} inputMode="decimal" style={{ width: 120 }} /></label>
+                      <label style={{ fontSize: 13 }}>Público: reactivación<input name="reactivate" defaultValue={(c.reactivateCents / 100).toString()} inputMode="decimal" style={{ width: 120 }} /></label>
+                      <label style={{ fontSize: 13 }}>Agencia: renovación/año<input name="agencyRenew" defaultValue={(c.agencyRenewCents / 100).toString()} inputMode="decimal" style={{ width: 120 }} /></label>
+                      <label style={{ fontSize: 13 }}>Agencia: reactivación<input name="agencyReactivate" defaultValue={(c.agencyReactivateCents / 100).toString()} inputMode="decimal" style={{ width: 120 }} /></label>
+                      <button className="btn sm">{ok === "precios" ? "Guardado ✓" : "Guardar"}</button>
                     </form>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="hint" style={{ marginTop: 8 }}>Si el precio de renovación está en 0, no se envían avisos de pago para esa compañía.</p>
+          <p className="hint" style={{ marginTop: 8 }}>Si el precio de renovación está en 0, no se envían avisos de pago (ni al público ni a las agencias).</p>
         </div>
       )}
     </AdminShell>

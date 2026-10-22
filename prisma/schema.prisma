@@ -427,6 +427,8 @@ model SimCarrier {
   iccidPrefixes   String
   renewCents      Int      @default(0)
   reactivateCents Int      @default(0)
+  agencyRenewCents      Int @default(0)
+  agencyReactivateCents Int @default(0)
   currency        String   @default("usd")
   active          Boolean  @default(true)
   updatedAt       DateTime @updatedAt
@@ -450,6 +452,7 @@ model SimCard {
   ownerUserId Int?
   ownerEmail  String?
   ownerPhone  String?
+  companyId   String?
   linkSource  String?
   firstSeenAt DateTime  @default(now())
   lastSyncAt  DateTime  @default(now())

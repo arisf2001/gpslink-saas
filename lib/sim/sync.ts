@@ -44,6 +44,12 @@ export async function deviceOwner(deviceId: number): Promise<DeviceOwner | null>
 const sameIccid = (a: string, b: string) => !!a && !!b && (a === b || (a.length >= 18 && b.length >= 18 && (a.startsWith(b) || b.startsWith(a))));
 const fmt = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "sin fecha");
 
+// Devices billed to a white-label company pay the agency price; the rest are direct clients of track.gpslinkusa.com.
+export async function agencyByDevice(): Promise<Map<number, string>> {
+  const rows = await prisma.billedDevice.findMany({ where: { removedAt: null }, select: { deviceId: true, companyId: true } });
+  return new Map(rows.map((r) => [r.deviceId, r.companyId]));
+}
+
 export async function recordEvent(iccid: string, kind: string, detail: string) {
   await prisma.simEvent.create({ data: { iccid, kind, detail } });
 }
@@ -52,6 +58,7 @@ export async function applyCards(cards: TelebayCard[], carrierCode: string, owne
   const summary = { cards: cards.length, created: 0, changed: 0, linked: 0 };
   const carriers = await ensureCarriers();
   const known = new Map((await prisma.simCard.findMany()).map((c) => [c.iccid, c]));
+  const agencyOf = await agencyByDevice();
   for (const card of cards) {
     const iccid = String(card.iccid ?? "").trim();
     if (!iccid) continue;
@@ -72,6 +79,7 @@ export async function applyCards(cards: TelebayCard[], carrierCode: string, owne
       country: card.countryName,
       lastSyncAt: now,
       goneAt: null,
+      ...(!manual && owner ? { companyId: agencyOf.get(owner.deviceId) ?? null } : {}),
       ...(!manual && owner
         ? { deviceId: owner.deviceId, deviceName: owner.deviceName, ownerUserId: owner.userId, ownerEmail: owner.email, ownerPhone: owner.phone, linkSource: "auto" }
         : {}),
