@@ -4,6 +4,7 @@ import { runSims } from "./sim/notify";
 import { runActivations } from "./activation";
 import { runEventNotifications } from "./notifications";
 import { runBorderZones } from "./border-zones";
+import { runRedZones } from "./red-zones";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -32,8 +33,14 @@ export function startLifecycleScheduler() {
     runBorderZones()
       .then((s) => (s.notices || s.cuts) && console.log("[zonas]", JSON.stringify(s)))
       .catch((e) => console.error("[zonas] failed:", e));
+  const redZones = () =>
+    runRedZones()
+      .then((s) => (s.notices || s.cuts) && console.log("[zonas-rojas]", JSON.stringify(s)))
+      .catch((e) => console.error("[zonas-rojas] failed:", e));
   setTimeout(zones, 80_000);
   setInterval(zones, 60_000);
+  setTimeout(redZones, 95_000);
+  setInterval(redZones, 60_000);
   setTimeout(events, 110_000);
   setInterval(events, 2 * 60_000);
   setTimeout(activations, 100_000);

@@ -1,7 +1,9 @@
 import { prisma } from "../db";
-import { aiSetting, assistantConfig, createConfirm, hasPin, t, type AiUser, type Channel, type Lang, type PendingConfirm } from "./assistant";
+import { aiSetting, assistantConfig, createConfirm, createZoneConfirm, hasPin, t, type AiUser, type Channel, type Lang, type PendingConfirm } from "./assistant";
 import * as gps from "./gps";
 import { findPlace, insidePlace, reverseGeocode } from "./geocode";
+import { createRedZone, deleteRedZone, listRedZones, MAX_ZONE_KM, zoneDevices, zoneShape } from "../red-zones";
+import { CUT_SPEED_KMH } from "../border-zones";
 import { deviceStatuses } from "../device-status";
 import { colorName, matchesVehicle, typeName, vehicleProfiles, type VehicleProfile } from "../vehicle-profile";
 
@@ -28,6 +30,10 @@ const TOOLS = [
   { type: "function", function: { name: "get_vehicle", description: "Current location, address, speed, ignition and last report of one vehicle.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
   { type: "function", function: { name: "vehicles_in_place", description: "Which of the customer's vehicles are now inside a city, state, province, neighbourhood or country (e.g. 'Allentown', 'Florida', 'Santo Domingo', 'República Dominicana').", parameters: { type: "object", properties: { place: { type: "string", description: "Place name, adding the state or country when it is ambiguous (e.g. 'Santiago, República Dominicana')" } }, required: ["place"], additionalProperties: false } } },
   { type: "function", function: { name: "get_history", description: "Trips summary for a vehicle between two local datetimes (America/Santo_Domingo): distance, top speed, moving/stopped time and stops.", parameters: { type: "object", properties: { device_id: { type: "integer" }, from: { type: "string", description: "YYYY-MM-DD HH:MM" }, to: { type: "string", description: "YYYY-MM-DD HH:MM" } }, required: ["device_id", "from", "to"], additionalProperties: false } } },
+  { type: "function", function: { name: "create_red_zone", description: `Create a red zone like the Haiti border one: alert when a vehicle enters and automatic engine stop when it slows to ${20} km/h inside. It starts INACTIVE and only works after the customer confirms with the PIN.`, parameters: { type: "object", properties: { place: { type: "string", description: "City, neighbourhood, address or place, with state or country when ambiguous" }, radius_km: { type: "number", description: `Optional radius around the place in km (max ${200}). Omit to use the whole area of a city/neighbourhood/state.` }, device_ids: { type: "array", items: { type: "integer" }, description: "Vehicles it applies to; empty or omitted = all the customer's vehicles" }, name: { type: "string", description: "Optional short name" } }, required: ["place"], additionalProperties: false } } },
+  { type: "function", function: { name: "list_red_zones", description: "List the customer's red zones (active or waiting for PIN).", parameters: { type: "object", properties: {}, additionalProperties: false } } },
+  { type: "function", function: { name: "activate_red_zone", description: "Ask the PIN to activate an inactive red zone.", parameters: { type: "object", properties: { zone_id: { type: "string" } }, required: ["zone_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "delete_red_zone", description: "Delete one of the customer's red zones.", parameters: { type: "object", properties: { zone_id: { type: "string" } }, required: ["zone_id"], additionalProperties: false } } },
   { type: "function", function: { name: "request_engine_command", description: "Prepare an engine stop or resume. It does NOT execute: the customer must confirm with their PIN in the app/web.", parameters: { type: "object", properties: { device_id: { type: "integer" }, command: { type: "string", enum: ["engine_stop", "engine_resume"] } }, required: ["device_id", "command"], additionalProperties: false } } },
 ];
 
@@ -51,6 +57,7 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
     channel === "whatsapp" ? "This is WhatsApp: plain text, include links as plain URLs. To confirm an engine order the customer replies here with their PIN (never say app/web)."
       : channel === "alexa" ? "This is a voice answer spoken by Alexa: 1-3 short sentences, no links, no lists, no markdown, no emojis; say numbers naturally. Mention only the GPS device values that are known (skip the unavailable ones) and only battery/signal when asked or when something is wrong. Engine stop/resume is not available by voice: if asked, only say it must be done in the app or web with the PIN; do not ask follow-up questions about it."
       : "The app/web shows buttons for map, Street View and history, so you do not need to paste links.",
+    "Red zones (zona roja): when the customer asks for one, use create_red_zone (find the vehicles first with list_vehicles if they name some). Explain it alerts on entry and stops the engine when the vehicle slows to 20 km/h inside, and that it only turns on after the PIN confirmation (never say it is active before that). On voice it stays inactive: tell them to activate it in the app, web or WhatsApp.",
     "Do not answer questions unrelated to the customer's vehicles or GPS tracking; politely redirect.",
     deviceId ? `The vehicle currently open on screen has device_id ${deviceId}; "it" refers to that vehicle.` : "",
     `Always answer in ${lang === "en" ? "English" : "Spanish"}, even when the tool data or the question is in another language.`,
@@ -189,13 +196,39 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
   };
 
   const voice = channel === "alexa";
-  if (voice) delete tools.request_engine_command;
+  const zoneInfo = (z: { id: string; name: string; radiusM: number | null; deviceIds: string; active: boolean; cut: boolean }) => ({
+    zone_id: z.id, name: z.name, shape: zoneShape(z, lang), vehicles: zoneDevices(z).length || "all", active: z.active, engine_stop_at_kmh: z.cut ? CUT_SPEED_KMH : null,
+  });
+  tools.create_red_zone = async ({ place, radius_km, device_ids, name }) => {
+    const ids = Array.isArray(device_ids) ? device_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
+    for (const id of ids) if (!(await find(id))) return { error: `Vehicle ${id} not found among the customer's vehicles` };
+    const radius = Number(radius_km);
+    if (radius_km !== undefined && !(radius > 0 && radius <= MAX_ZONE_KM)) return { error: `radius_km must be between 0.1 and ${MAX_ZONE_KM}` };
+    const zone = await createRedZone(user.userId, { place: String(place ?? ""), radiusKm: radius_km === undefined ? null : radius, deviceIds: ids, name: name ? String(name) : null }, lang);
+    if ("error" in zone) return zone;
+    if (voice) return { ...zoneInfo(zone), status: "created_inactive", how_to_activate: "By voice it cannot be activated: tell the customer to say in the app, web or WhatsApp 'activa la zona roja " + zone.name + "' and confirm with the PIN." };
+    if (!(await hasPin(user.userId))) return { ...zoneInfo(zone), status: "created_inactive", error: "The customer has no PIN yet. Tell them to create one in the assistant settings (PIN option) and then ask to activate the zone." };
+    confirm = await createZoneConfirm(user, zone.id, zone.name);
+    return { ...zoneInfo(zone), status: "awaiting_pin_confirmation" };
+  };
+  tools.list_red_zones = async () => ({ zones: (await listRedZones(user.userId)).map(zoneInfo) });
+  tools.activate_red_zone = async ({ zone_id }) => {
+    const zone = (await listRedZones(user.userId)).find((z) => z.id === String(zone_id));
+    if (!zone) return { error: "Red zone not found" };
+    if (zone.active) return { ...zoneInfo(zone), status: "already_active" };
+    if (!(await hasPin(user.userId))) return { error: "The customer has no PIN yet. Tell them to create one in the assistant settings (PIN option) and ask again." };
+    confirm = await createZoneConfirm(user, zone.id, zone.name);
+    return { ...zoneInfo(zone), status: "awaiting_pin_confirmation" };
+  };
+  tools.delete_red_zone = async ({ zone_id }) => ((await deleteRedZone(user, String(zone_id))) ? { status: "deleted" } : { error: "Red zone not found" });
+  const VOICE_BLOCKED = ["request_engine_command", "activate_red_zone"];
+  if (voice) for (const name of VOICE_BLOCKED) delete tools[name];
   const messages: Msg[] = [{ role: "system", content: systemPrompt(config.name, config.companyName, lang, input.deviceId, channel) }, ...past, { role: "user", content: input.message }];
   let reply = "";
   let tokensIn = 0;
   let tokensOut = 0;
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const data = await openai(setting.model, messages, voice ? TOOLS.filter((x) => x.function.name !== "request_engine_command") : TOOLS, voice ? "minimal" : "low");
+    const data = await openai(setting.model, messages, voice ? TOOLS.filter((x) => !VOICE_BLOCKED.includes(x.function.name)) : TOOLS, voice ? "minimal" : "low");
     tokensIn += data.usage?.prompt_tokens ?? 0;
     tokensOut += data.usage?.completion_tokens ?? 0;
     const msg = data.choices[0].message;

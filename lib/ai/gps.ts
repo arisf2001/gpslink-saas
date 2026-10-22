@@ -179,3 +179,21 @@ export function streetViewUrl(lat: number, lng: number): string {
 export function mapUrl(lat: number, lng: number): string {
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 }
+
+// Red zones are also saved as GPS Link geofences so they show on the customer's map.
+export async function addGeofence(hash: string, name: string, shape: { lat: number; lng: number; radiusM: number } | { ring: [number, number][] }): Promise<number | null> {
+  if (isMock()) return null;
+  const params: Record<string, string> = { name, polygon_color: "#e11d48" };
+  if ("radiusM" in shape) Object.assign(params, { type: "circle", "center[lat]": String(shape.lat), "center[lng]": String(shape.lng), radius: String(shape.radiusM) });
+  else {
+    params.type = "polygon";
+    shape.ring.forEach(([lng, lat], i) => Object.assign(params, { [`polygon[${i}][lat]`]: String(lat), [`polygon[${i}][lng]`]: String(lng) }));
+  }
+  const data = (await userCall(hash, "add_geofence", params, "POST")) as { status?: number; item?: { id?: number } } | null;
+  return data?.status === 1 && data.item?.id ? Number(data.item.id) : null;
+}
+
+export async function deleteGeofence(hash: string, id: number): Promise<void> {
+  if (isMock()) return;
+  await userCall(hash, "destroy_geofence", { geofence_id: String(id) }, "POST");
+}

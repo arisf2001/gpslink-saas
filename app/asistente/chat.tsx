@@ -98,7 +98,7 @@ export function AssistantChat() {
         {busy && <div className="ia-msg assistant"><div className="ia-bubble ia-typing">Escribiendo…</div></div>}
         {confirm && (
           <div className="ia-confirm">
-            <strong>{confirm.command === "engine_stop" ? "Apagar motor" : "Encender motor"}: {confirm.device_name}</strong>
+            <strong>{confirm.command === "engine_stop" ? "Apagar motor" : confirm.command === "zone_activate" ? "Activar zona roja" : "Encender motor"}: {confirm.device_name}</strong>
             <input type="password" inputMode="numeric" placeholder="Tu PIN" maxLength={6} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} autoComplete="off" />
             <div className="row">
               <button className="btn sm red" disabled={busy || pin.length < 4} onClick={doConfirm}>Confirmar</button>

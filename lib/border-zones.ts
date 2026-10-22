@@ -42,8 +42,8 @@ export async function engineSequence(deviceId: number, stop: boolean, send: Send
   if (first.ok && relay.ok) return { ok: true };
   return { ok: first.ok || relay.ok, error: [first.ok ? null : `motor: ${first.error}`, relay.ok ? null : `bomba (Bluetooth): ${relay.error}`].filter(Boolean).join("; ") };
 }
-const adminSender = (deviceId: number): Sender => ({ engine: (stop) => adminCommand(deviceId, stop ? "engineStop" : "engineResume"), custom: (data) => adminCommand(deviceId, "custom", data) });
-const userSender = (hash: string, deviceId: number): Sender => ({ engine: (stop) => sendCommand(hash, deviceId, stop ? "engine_stop" : "engine_resume"), custom: (data) => sendCustom(hash, deviceId, data) });
+export const adminSender = (deviceId: number): Sender => ({ engine: (stop) => adminCommand(deviceId, stop ? "engineStop" : "engineResume"), custom: (data) => adminCommand(deviceId, "custom", data) });
+export const userSender = (hash: string, deviceId: number): Sender => ({ engine: (stop) => sendCommand(hash, deviceId, stop ? "engine_stop" : "engine_resume"), custom: (data) => sendCustom(hash, deviceId, data) });
 
 function insideHaiti(lng: number, lat: number): boolean {
   let inside = false;
@@ -113,7 +113,7 @@ async function positions(): Promise<Position[]> {
 }
 
 const mapLink = (p: Position) => `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
-const HOW_TO_RESUME = "Para encenderlo de nuevo responde ENCENDER a este mensaje de WhatsApp, o usa «Encender motor» en la app o en la web.";
+export const HOW_TO_RESUME = "Para encenderlo de nuevo responde ENCENDER a este mensaje de WhatsApp, o usa «Encender motor» en la app o en la web.";
 
 function zoneMessage(kind: string, p: Position, km: number, cut: { state: CutState; error?: string }): Message {
   const vehicle = p.plate ? `${p.name} (${p.plate})` : p.name;
@@ -184,7 +184,7 @@ export async function runBorderZones(): Promise<{ checked: number; notices: numb
   return summary;
 }
 
-async function userDeviceIds(userId: number): Promise<number[]> {
+export async function userDeviceIds(userId: number): Promise<number[]> {
   if (isMock()) return (await prisma.mockDevice.findMany({ where: { gpswoxUserId: userId }, select: { id: true } })).map((d) => d.id);
   return withGpswoxDb(async (conn) => {
     const [rows] = await conn.query<RowDataPacket[]>("SELECT device_id FROM user_device_pivot WHERE user_id = ?", [userId]);

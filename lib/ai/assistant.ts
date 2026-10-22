@@ -78,12 +78,18 @@ export async function setPin(user: AiUser, password: string, pin: string, lang: 
   return { ok: true, reply: t(lang, "Listo, tu PIN quedó guardado.", "Done, your PIN was saved.") };
 }
 
-export type PendingConfirm = { token: string; command: gps.EngineCommand; device_id: number; device_name: string; requires_pin: true };
+export type PendingConfirm = { token: string; command: gps.EngineCommand | "zone_activate"; device_id: number; device_name: string; requires_pin: true };
 
 export async function createConfirm(user: AiUser, deviceId: number, deviceName: string, command: gps.EngineCommand): Promise<PendingConfirm> {
   const token = `cf_${randomBytes(18).toString("base64url")}`;
   await prisma.aiConfirm.create({ data: { id: sha(token), gpswoxUserId: user.userId, deviceId, deviceName, command, expiresAt: new Date(Date.now() + CONFIRM_SECONDS * 1000) } });
   return { token, command, device_id: deviceId, device_name: deviceName, requires_pin: true };
+}
+
+export async function createZoneConfirm(user: AiUser, zoneId: string, zoneName: string): Promise<PendingConfirm> {
+  const token = `cf_${randomBytes(18).toString("base64url")}`;
+  await prisma.aiConfirm.create({ data: { id: sha(token), gpswoxUserId: user.userId, deviceId: 0, deviceName: zoneName.slice(0, 190), command: "zone_activate", zoneId, expiresAt: new Date(Date.now() + CONFIRM_SECONDS * 1000) } });
+  return { token, command: "zone_activate", device_id: 0, device_name: zoneName, requires_pin: true };
 }
 
 export async function confirmCommand(user: AiUser, token: string, pin: string, channel: Channel, lang: Lang): Promise<{ ok: boolean; reply: string }> {
@@ -111,6 +117,15 @@ export async function confirmCommand(user: AiUser, token: string, pin: string, c
   const claimed = await prisma.aiConfirm.updateMany({ where: { id: pending.id, usedAt: null }, data: { usedAt: now } });
   if (!claimed.count) return { ok: false, reply: t(lang, "Esta confirmación ya se usó.", "This confirmation was already used.") };
   await prisma.aiPin.update({ where: { gpswoxUserId: user.userId }, data: { failed: 0, lockedUntil: null } });
+  if (pending.command === "zone_activate") {
+    const { activateRedZone } = await import("../red-zones");
+    const zone = await activateRedZone(user, pending.zoneId ?? "");
+    if (!zone) return { ok: false, reply: t(lang, "Esa zona roja ya no existe.", "That red zone no longer exists.") };
+    return {
+      ok: true,
+      reply: t(lang, `Listo. La zona roja «${zone.name}» quedó activa: te aviso cuando un vehículo entre y apago el motor cuando baje a 20 km/h.`, `Done. The red zone "${zone.name}" is active: I will alert you when a vehicle enters and stop the engine when it slows to 20 km/h.`),
+    };
+  }
   const command = pending.command as gps.EngineCommand;
   let result: { ok: boolean; error?: string };
   try {

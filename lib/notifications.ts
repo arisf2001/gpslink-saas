@@ -16,10 +16,10 @@ const CLIENT_BRAND_WA = { clientWa: true, brandWa: true };
 
 export const NOTIFICATIONS: NotificationKind[] = [
   { key: "sos", label: "SOS (botón de pánico)", group: "vehiculo", events: ["sos"], defaults: { clientWa: true, clientEmail: true, brandWa: true } },
-  { key: "zone_red", label: "Zona roja: a menos de 10 km de Haití (emergencia y apagado del motor)", group: "vehiculo", defaults: { clientWa: true, clientEmail: true, brandWa: true } },
+  { key: "zone_red", label: "Zona roja: a menos de 10 km de Haití o zona roja creada con el asistente (emergencia y apagado del motor)", group: "vehiculo", defaults: { clientWa: true, clientEmail: true, brandWa: true } },
   { key: "zone_pink", label: "Zona rosada: a menos de 30 km de Haití", group: "vehiculo", defaults: { clientWa: true, clientEmail: true } },
   { key: "zone_yellow", label: "Zona amarilla: a menos de 100 km de Haití", group: "vehiculo", defaults: CLIENT_WA },
-  { key: "zone_exit", label: "Salió de las zonas de la frontera", group: "vehiculo", defaults: CLIENT_WA },
+  { key: "zone_exit", label: "Salió de las zonas de la frontera o de una zona roja", group: "vehiculo", defaults: CLIENT_WA },
   { key: "power_cut", label: "Desconectado de la corriente (revisión automática)", group: "vehiculo", defaults: CLIENT_BRAND_WA },
   { key: "low_battery", label: "Batería baja (revisión automática)", group: "vehiculo", defaults: CLIENT_BRAND_WA },
   { key: "offline", label: "Sin reportar (revisión automática)", group: "vehiculo", defaults: CLIENT_BRAND_WA },

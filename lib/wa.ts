@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { borderEngineReply } from "./border-zones";
+import { redZoneEngineReply } from "./red-zones";
 import { aiSetting, confirmCommand, rateLimit, resolveUser, type AiUser } from "./ai/assistant";
 import { chat } from "./ai/engine";
 import { prisma } from "./db";
@@ -110,7 +111,7 @@ export async function handleIncoming(companyId: string, phone: string, text: str
 
   const engine = /^(encender|apagar)[.!]*$/i.exec(message);
   if (engine) {
-    const reply = await borderEngineReply(user, engine[1].toLowerCase());
+    const reply = (await borderEngineReply(user, engine[1].toLowerCase())) ?? (await redZoneEngineReply(user, engine[1].toLowerCase()));
     if (reply) return reply;
   }
 

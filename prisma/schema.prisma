@@ -274,6 +274,7 @@ model AiConfirm {
   deviceId     Int
   deviceName   String
   command      String
+  zoneId       String?
   expiresAt    DateTime
   usedAt       DateTime?
   createdAt    DateTime  @default(now())
@@ -642,4 +643,33 @@ model TicketMessage {
   createdAt   DateTime      @default(now())
 
   @@index([ticketId])
+}
+
+model RedZone {
+  id           String   @id @default(cuid())
+  gpswoxUserId Int
+  name         String   @db.VarChar(120)
+  lat          Float
+  lng          Float
+  radiusM      Int?
+  geometry     String?  @db.MediumText
+  bbox         String?  @db.VarChar(120)
+  deviceIds    String   @default("[]") @db.VarChar(4000)
+  cut          Boolean  @default(true)
+  active       Boolean  @default(false)
+  geofenceId   Int?
+  createdAt    DateTime @default(now())
+
+  @@index([gpswoxUserId])
+}
+
+model RedZoneState {
+  zoneId    String
+  deviceId  Int
+  cutState  String?   @db.VarChar(10)
+  cutAt     DateTime?
+  cutError  String?   @db.VarChar(255)
+  updatedAt DateTime  @updatedAt
+
+  @@id([zoneId, deviceId])
 }
