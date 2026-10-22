@@ -76,3 +76,56 @@ export async function reverseGeocode(lat: number, lng: number, lang: Lang): Prom
   if (cache.size > 20000) cache.delete(cache.keys().next().value!);
   return place;
 }
+
+// Place search (city, state, country...) with its boundary, to find which vehicles are inside it.
+type Ring = number[][];
+type Geometry = { type: "Polygon"; coordinates: Ring[] } | { type: "MultiPolygon"; coordinates: Ring[][] } | { type: string; coordinates?: unknown };
+export type FoundPlace = { name: string; kind: string; geometry: Geometry; bbox: [number, number, number, number] };
+const placeCache = new Map<string, { at: number; place: FoundPlace | null }>();
+
+export async function findPlace(query: string, lang: Lang): Promise<FoundPlace | null> {
+  const q = query.trim().slice(0, 120);
+  if (!q) return null;
+  const key = `${lang}:${q.toLowerCase()}`;
+  const hit = placeCache.get(key);
+  if (hit && Date.now() - hit.at < 7 * 864e5) return hit.place;
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&limit=1&polygon_geojson=1&polygon_threshold=0.005&accept-language=${lang}`;
+  let place: FoundPlace | null = null;
+  try {
+    const res = await throttled(() => fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(4000) }));
+    if (!res.ok) return null;
+    const first = ((await res.json()) as { display_name?: string; addresstype?: string; type?: string; boundingbox?: string[]; geojson?: Geometry }[])[0];
+    if (first?.geojson && first.boundingbox) {
+      const [s, n, w, e] = first.boundingbox.map(Number);
+      place = { name: String(first.display_name ?? q), kind: String(first.addresstype ?? first.type ?? "place"), geometry: first.geojson, bbox: [s, n, w, e] };
+    }
+  } catch {
+    return null;
+  }
+  placeCache.set(key, { at: Date.now(), place });
+  if (placeCache.size > 2000) placeCache.delete(placeCache.keys().next().value!);
+  return place;
+}
+
+function inRing(lat: number, lng: number, ring: Ring): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+const inPolygon = (lat: number, lng: number, rings: Ring[]) => rings.length > 0 && inRing(lat, lng, rings[0]) && !rings.slice(1).some((hole) => inRing(lat, lng, hole));
+
+export function insidePlace(lat: number, lng: number, place: Pick<FoundPlace, "geometry" | "bbox">): boolean {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return false;
+  const g = place.geometry;
+  if (g.type === "Polygon") return inPolygon(lat, lng, g.coordinates as Ring[]);
+  if (g.type === "MultiPolygon") return (g.coordinates as Ring[][]).some((p) => inPolygon(lat, lng, p));
+  // A point or line result (small place): use a 2 km box around it.
+  const [s, n, w, e] = place.bbox;
+  const pad = 0.02;
+  return lat >= s - pad && lat <= n + pad && lng >= w - pad && lng <= e + pad;
+}

@@ -34,3 +34,16 @@ test("timeAgo speaks minutes, hours, days and months", async () => {
   assert.equal(timeAgo(279359, "en"), "6 months");
   assert.equal(timeAgo(null, "es"), null);
 });
+
+test("insidePlace handles polygons, holes and multipolygons", async () => {
+  const { insidePlace } = await import("../lib/ai/geocode");
+  const square = [[-76, 40], [-75, 40], [-75, 41], [-76, 41], [-76, 40]];
+  const hole = [[-75.6, 40.4], [-75.4, 40.4], [-75.4, 40.6], [-75.6, 40.6], [-75.6, 40.4]];
+  const poly = { geometry: { type: "Polygon", coordinates: [square, hole] }, bbox: [40, 41, -76, -75] as [number, number, number, number] };
+  assert.equal(insidePlace(40.8, -75.8, poly), true);
+  assert.equal(insidePlace(40.5, -75.5, poly), false);
+  assert.equal(insidePlace(18.47, -69.93, poly), false);
+  const multi = { geometry: { type: "MultiPolygon", coordinates: [[square], [[[-70, 18], [-69, 18], [-69, 19], [-70, 19], [-70, 18]]]] }, bbox: [18, 41, -76, -69] as [number, number, number, number] };
+  assert.equal(insidePlace(18.47, -69.93, multi), true);
+  assert.equal(insidePlace(0, 0, multi), false);
+});

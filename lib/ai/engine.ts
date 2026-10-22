@@ -1,7 +1,7 @@
 import { prisma } from "../db";
 import { aiSetting, assistantConfig, createConfirm, hasPin, t, type AiUser, type Channel, type Lang, type PendingConfirm } from "./assistant";
 import * as gps from "./gps";
-import { reverseGeocode } from "./geocode";
+import { findPlace, insidePlace, reverseGeocode } from "./geocode";
 import { deviceStatuses } from "../device-status";
 import { colorName, matchesVehicle, typeName, vehicleProfiles, type VehicleProfile } from "../vehicle-profile";
 
@@ -26,6 +26,7 @@ const MAX_ROUNDS = 6;
 const TOOLS = [
   { type: "function", function: { name: "list_vehicles", description: "List the customer's vehicles with status, make, model, year, color, type and nickname. Use it to find a vehicle by name, plate, nickname, color, make, model or type (e.g. 'la jeepeta', 'el carro rojo', 'el Toyota').", parameters: { type: "object", properties: { search: { type: "string", description: "Optional filter: name, plate, nickname, color, make, model or type, in the customer's words" } }, additionalProperties: false } } },
   { type: "function", function: { name: "get_vehicle", description: "Current location, address, speed, ignition and last report of one vehicle.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "vehicles_in_place", description: "Which of the customer's vehicles are now inside a city, state, province, neighbourhood or country (e.g. 'Allentown', 'Florida', 'Santo Domingo', 'República Dominicana').", parameters: { type: "object", properties: { place: { type: "string", description: "Place name, adding the state or country when it is ambiguous (e.g. 'Santiago, República Dominicana')" } }, required: ["place"], additionalProperties: false } } },
   { type: "function", function: { name: "get_history", description: "Trips summary for a vehicle between two local datetimes (America/Santo_Domingo): distance, top speed, moving/stopped time and stops.", parameters: { type: "object", properties: { device_id: { type: "integer" }, from: { type: "string", description: "YYYY-MM-DD HH:MM" }, to: { type: "string", description: "YYYY-MM-DD HH:MM" } }, required: ["device_id", "from", "to"], additionalProperties: false } } },
   { type: "function", function: { name: "request_engine_command", description: "Prepare an engine stop or resume. It does NOT execute: the customer must confirm with their PIN in the app/web.", parameters: { type: "object", properties: { device_id: { type: "integer" }, command: { type: "string", enum: ["engine_stop", "engine_resume"] } }, required: ["device_id", "command"], additionalProperties: false } } },
 ];
@@ -43,6 +44,7 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
     "Say where a vehicle is with get_vehicle's location: street, neighbourhood or city, state, and \"near <near>\" with the distance when near is given. Never read latitude/longitude to the customer unless location and address are both unknown. Say how long ago it reported with last_report_ago (never a raw count of minutes).",
     "When you describe one vehicle, add one short line with its GPS device status from gps_device: battery %, GSM signal (x/4), satellites, whether it is connected to the vehicle power and whether the engine is blocked. Say \"no disponible\" for missing values; never invent them. If it is not connected to the vehicle power, point it out.",
     "When several vehicles match, ask which one. If the customer has only one vehicle, use it.",
+    "To know which vehicles are in a city, state or country, use vehicles_in_place; give the total and name them (on voice, name at most 5 and say how many more).",
     "Customers may refer to a vehicle by its nickname, color, make, model or type (e.g. 'la jeepeta', 'el carro rojo', 'el Toyota'): pass those words as the list_vehicles search, and mention the nickname when you answer.",
     "Street View images are from Google and are not live; the location and speed are live.",
     "Engine stop/resume: only when the customer asks, and only through request_engine_command. Never say it was executed: tell the customer to confirm with their PIN. If the vehicle is moving, warn that stopping it can be dangerous. Do not offer engine commands unprompted.",
@@ -131,6 +133,17 @@ export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => 
         lat: v.lat, lng: v.lng, last_report: v.time, minutes_since_last_report: minutesAgo(v.timestamp), last_report_ago: timeAgo(minutesAgo(v.timestamp), lang), stopped_for: v.stopDuration,
         map_url: gps.mapUrl(v.lat, v.lng), street_view_url: gps.streetViewUrl(v.lat, v.lng),
         gps_device: await deviceInfo(v.id),
+      };
+    },
+    vehicles_in_place: async ({ place }) => {
+      const found = await findPlace(String(place ?? ""), lang);
+      if (!found) return { error: "Place not found; ask the customer for the city with its state or country" };
+      const all = await fleet();
+      const inside = all.filter((v) => insidePlace(v.lat, v.lng, found));
+      const profiles = await profilesFor(inside.map((v) => v.id));
+      return {
+        place: found.name, kind: found.kind, total: inside.length, fleet_total: all.length,
+        vehicles: inside.slice(0, 40).map((v) => ({ device_id: v.id, name: v.name, plate: v.plate, ...describe(profiles.get(v.id)), status: v.online, speed: `${v.speed} ${v.speedUnit}`, address: v.address, last_report_ago: timeAgo(minutesAgo(v.timestamp), lang) })),
       };
     },
     get_history: async ({ device_id, from, to }) => {
