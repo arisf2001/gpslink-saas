@@ -62,3 +62,15 @@ export async function markDoneAction(formData: FormData) {
   revalidatePath("/admin/sim");
   redirect("/admin/sim?f=pagadas&ok=done");
 }
+
+export async function saveSupplierAction(formData: FormData) {
+  if (!(await getSession("admin"))) redirect("/admin");
+  const code = String(formData.get("code") ?? "");
+  const field = (k: string) => String(formData.get(k) ?? "").trim().slice(0, k === "supplierNotes" ? 5000 : 190) || null;
+  await prisma.simCarrier.update({
+    where: { code },
+    data: { supplierContact: field("supplierContact"), supplierEmail: field("supplierEmail"), supplierPhone: field("supplierPhone"), supplierWeb: field("supplierWeb"), supplierNotes: field("supplierNotes") },
+  });
+  revalidatePath("/admin/sim");
+  redirect(`/admin/sim?f=${encodeURIComponent(String(formData.get("f") ?? "hoy"))}&ok=suplidor#suplidor`);
+}

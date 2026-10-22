@@ -39,3 +39,42 @@ export const DAY = 86_400_000;
 export function daysLeft(expiresAt: Date | null, now = new Date()): number | null {
   return expiresAt ? Math.ceil((expiresAt.getTime() - now.getTime()) / DAY) : null;
 }
+
+const COUNTRY_ES: Record<string, string> = {
+  多米尼加共和国: "República Dominicana",
+  多米尼加: "República Dominicana",
+  美国: "Estados Unidos",
+  美利坚合众国: "Estados Unidos",
+  波多黎各: "Puerto Rico",
+  墨西哥: "México",
+  加拿大: "Canadá",
+  哥伦比亚: "Colombia",
+  委内瑞拉: "Venezuela",
+  海地: "Haití",
+  古巴: "Cuba",
+  巴拿马: "Panamá",
+  哥斯达黎加: "Costa Rica",
+  危地马拉: "Guatemala",
+  洪都拉斯: "Honduras",
+  萨尔瓦多: "El Salvador",
+  尼加拉瓜: "Nicaragua",
+  厄瓜多尔: "Ecuador",
+  秘鲁: "Perú",
+  智利: "Chile",
+  阿根廷: "Argentina",
+  巴西: "Brasil",
+  玻利维亚: "Bolivia",
+  巴拉圭: "Paraguay",
+  乌拉圭: "Uruguay",
+  牙买加: "Jamaica",
+  西班牙: "España",
+  中国: "China",
+  香港: "Hong Kong",
+  中国香港: "Hong Kong",
+  全球: "Global",
+};
+
+export function countryEs(name: string | null | undefined): string {
+  if (!name) return "";
+  return COUNTRY_ES[name.trim()] ?? name;
+}

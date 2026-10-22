@@ -429,6 +429,11 @@ model SimCarrier {
   reactivateCents Int      @default(0)
   agencyRenewCents      Int @default(0)
   agencyReactivateCents Int @default(0)
+  supplierContact String?
+  supplierEmail   String?
+  supplierPhone   String?
+  supplierWeb     String?
+  supplierNotes   String?  @db.Text
   currency        String   @default("usd")
   active          Boolean  @default(true)
   updatedAt       DateTime @updatedAt

@@ -4,11 +4,11 @@ import type { SimCard } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { formatDate, formatMoney } from "@/lib/format";
 import { getSession } from "@/lib/session";
-import { daysLeft, ensureCarriers, statusLabel } from "@/lib/sim/carriers";
+import { countryEs, daysLeft, ensureCarriers, SIM_STATUS, statusLabel } from "@/lib/sim/carriers";
 import { dailyReportData, NOTICE_DAYS, REACTIVATION_NOTE } from "@/lib/sim/notify";
 import { telebayConfigured } from "@/lib/sim/telebay";
 import { AdminShell } from "../admin-shell";
-import { linkSimAction, markDoneAction, saveCarrierAction, syncNowAction } from "./actions";
+import { linkSimAction, markDoneAction, saveCarrierAction, saveSupplierAction, syncNowAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +20,36 @@ const TABS = [
   ["sin-equipo", "Sin equipo"],
   ["precios", "Precios"],
 ] as const;
+
+const EXPIRY = [
+  ["", "Cualquier vencimiento"],
+  ["vencidas", "Vencidas"],
+  ["10", `Vencen en ${NOTICE_DAYS} días o menos`],
+  ["30", "Vencen en 30 días o menos"],
+  ["90", "Vencen en 90 días o menos"],
+  ["sin-fecha", "Sin fecha (plan sin empezar)"],
+] as const;
+
+type Filters = { q?: string; estado?: string; vence?: string; cia?: string; equipo?: string; tipo?: string; pais?: string };
+
+function applyFilters(cards: SimCard[], fl: Filters, now: Date): SimCard[] {
+  const q = fl.q?.trim().toLowerCase();
+  return cards.filter((c) => {
+    if (q && ![c.iccid, c.msisdn, c.imei, c.deviceName, c.ownerEmail, c.ownerPhone].some((v) => v?.toLowerCase().includes(q))) return false;
+    if (fl.estado && String(c.status) !== fl.estado) return false;
+    if (fl.cia && c.carrierCode !== fl.cia) return false;
+    if (fl.pais && countryEs(c.country) !== fl.pais) return false;
+    if (fl.equipo === "con" && !c.deviceId) return false;
+    if (fl.equipo === "sin" && c.deviceId) return false;
+    if (fl.tipo === "directo" && (!c.deviceId || c.companyId)) return false;
+    if (fl.tipo === "agencia" && !c.companyId) return false;
+    const d = daysLeft(c.expiresAt, now);
+    if (fl.vence === "vencidas" && !(d !== null && d <= 0)) return false;
+    if (fl.vence === "sin-fecha" && d !== null) return false;
+    if (["10", "30", "90"].includes(fl.vence ?? "") && !(d !== null && d > 0 && d <= Number(fl.vence))) return false;
+    return true;
+  });
+}
 
 const when = (d: Date) => d.toLocaleString("es-DO", { timeZone: "America/Santo_Domingo", dateStyle: "short", timeStyle: "short" });
 
@@ -38,7 +68,7 @@ function SimTable({ cards, now, agencies }: { cards: SimCard[]; now: Date; agenc
         {cards.length === 0 && <tr><td colSpan={6} className="hint">No hay SIM en esta lista.</td></tr>}
         {cards.map((c) => (
           <tr key={c.iccid}>
-            <td><a href={`https://web.telebay.cn/#/?iccid=${c.iccid}&lang=es`} target="_blank" rel="noreferrer">{c.iccid}</a><div className="hint">{c.country ?? ""}</div></td>
+            <td><a href={`https://web.telebay.cn/#/?iccid=${c.iccid}&lang=es`} target="_blank" rel="noreferrer">{c.iccid}</a><div className="hint">{countryEs(c.country)}</div></td>
             <td>{statusLabel(c.status)}</td>
             <td>{c.deviceName ?? <span className="hint">Sin equipo</span>}<div className="hint">{c.companyId ? `Agencia: ${agencies.get(c.companyId) ?? ""}` : c.deviceId ? "Cliente directo" : ""}{c.ownerEmail ? ` · ${c.ownerEmail}` : ""}</div></td>
             <td>{c.packageName ?? "—"}<div className="hint">{c.usedMb.toFixed(2)} de {c.totalMb} MB</div></td>
@@ -51,9 +81,10 @@ function SimTable({ cards, now, agencies }: { cards: SimCard[]; now: Date; agenc
   );
 }
 
-export default async function SimPage({ searchParams }: { searchParams: Promise<{ f?: string; ok?: string; error?: string; q?: string }> }) {
+export default async function SimPage({ searchParams }: { searchParams: Promise<{ f?: string; ok?: string; error?: string } & Filters> }) {
   if (!(await getSession("admin"))) redirect("/admin");
-  const { f = "hoy", ok, error, q = "" } = await searchParams;
+  const sp = await searchParams;
+  const { f = "hoy", ok, error, q = "" } = sp;
   const now = new Date();
   const carriers = await ensureCarriers();
   const all = await prisma.simCard.findMany({ where: { goneAt: null }, orderBy: [{ expiresAt: "asc" }, { iccid: "asc" }] });
@@ -61,8 +92,9 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
   const pending = await prisma.simRenewal.findMany({ where: { status: "PAID" }, orderBy: { paidAt: "asc" } });
   const agencies = new Map((await prisma.company.findMany({ select: { id: true, name: true } })).map((c) => [c.id, c.name]));
   const lastSync = all.reduce<Date | null>((m, c) => (!m || c.lastSyncAt > m ? c.lastSyncAt : m), null);
-  const search = q.trim();
-  const filtered = search ? all.filter((c) => [c.iccid, c.msisdn, c.deviceName, c.ownerEmail].some((v) => v?.toLowerCase().includes(search.toLowerCase()))) : all;
+  const filtered = applyFilters(all, sp, now);
+  const countries = [...new Set(all.map((c) => countryEs(c.country)).filter(Boolean))].sort();
+  const filtering = [sp.q, sp.estado, sp.vence, sp.cia, sp.equipo, sp.tipo, sp.pais].some((v) => v?.trim());
   const counts = { active: all.filter((c) => c.status === 2).length, linked: all.filter((c) => c.deviceId).length };
 
   return (
@@ -76,7 +108,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
       {error === "sync" && <div className="err" style={{ margin: "10px 0" }}>No pudimos leer las SIM del proveedor. Inténtalo en unos minutos.</div>}
       {error === "link" && <div className="err" style={{ margin: "10px 0" }}>Revisa el ICCID y el número del equipo (ID de GPS Link).</div>}
       {error === "precio" && <div className="err" style={{ margin: "10px 0" }}>Precio o prefijo no válido.</div>}
-      {ok && <div className="ok" style={{ margin: "10px 0" }}>{ok === "sync" ? "SIM actualizadas." : ok === "link" ? "SIM unida al equipo." : ok === "done" ? "Marcada como reactivada; le avisamos al cliente." : "Precios guardados."}</div>}
+      {ok && <div className="ok" style={{ margin: "10px 0" }}>{ok === "sync" ? "SIM actualizadas." : ok === "link" ? "SIM unida al equipo." : ok === "done" ? "Marcada como reactivada; le avisamos al cliente." : ok === "suplidor" ? "Contacto del suplidor guardado." : "Precios guardados."}</div>}
 
       <div className="tabs" style={{ margin: "14px 0 10px" }}>
         {TABS.map(([k, label]) => (
@@ -103,7 +135,40 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
 
       {(f === "todas" || f === "vencer") && (
         <div className="panel">
-          {f === "todas" && <form className="row" style={{ marginBottom: 10 }}><input type="hidden" name="f" value="todas" /><input name="q" defaultValue={q} placeholder="Buscar ICCID, número, vehículo o correo" style={{ maxWidth: 360 }} /><button className="btn sm">Buscar</button></form>}
+          {f === "todas" && (
+            <form className="row" style={{ marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+              <input type="hidden" name="f" value="todas" />
+              <input name="q" defaultValue={q} placeholder="Buscar ICCID, IMEI, vehículo, correo o teléfono" style={{ maxWidth: 320 }} />
+              <select name="estado" defaultValue={sp.estado ?? ""} aria-label="Estado">
+                <option value="">Cualquier estado</option>
+                {Object.entries(SIM_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+              <select name="vence" defaultValue={sp.vence ?? ""} aria-label="Vencimiento">
+                {EXPIRY.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+              <select name="cia" defaultValue={sp.cia ?? ""} aria-label="Compañía">
+                <option value="">Todas las compañías</option>
+                {carriers.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+              </select>
+              <select name="pais" defaultValue={sp.pais ?? ""} aria-label="País">
+                <option value="">Todos los países</option>
+                {countries.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select name="equipo" defaultValue={sp.equipo ?? ""} aria-label="Equipo">
+                <option value="">Con o sin equipo</option>
+                <option value="con">Con equipo</option>
+                <option value="sin">Sin equipo</option>
+              </select>
+              <select name="tipo" defaultValue={sp.tipo ?? ""} aria-label="Cliente">
+                <option value="">Directos y agencias</option>
+                <option value="directo">Cliente directo</option>
+                <option value="agencia">Agencia</option>
+              </select>
+              <button className="btn sm">Buscar</button>
+              {filtering && <Link href="/admin/sim?f=todas" className="btn sm s">Quitar filtros</Link>}
+            </form>
+          )}
+          {f === "todas" && <p className="hint" style={{ marginBottom: 8 }}>Mostrando {filtered.length} de {all.length} SIM.</p>}
           <SimTable cards={f === "vencer" ? [...report.expired, ...report.soon] : filtered} now={now} agencies={agencies} />
         </div>
       )}
@@ -169,6 +234,23 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
           <p className="hint" style={{ marginTop: 8 }}>Si el precio de renovación está en 0, no se envían avisos de pago (ni al público ni a las agencias).</p>
         </div>
       )}
+      <div className="panel" id="suplidor" style={{ marginTop: 18 }}>
+        <h2 style={{ fontSize: 17, marginBottom: 6, textAlign: "left" }}>Contacto del suplidor</h2>
+        <p className="hint" style={{ marginBottom: 10 }}>Solo lo ves tú. Llénalo con los datos de cada compañía de SIM.</p>
+        {carriers.map((c) => (
+          <form key={c.code} action={saveSupplierAction} style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", marginBottom: 12 }}>
+            <input type="hidden" name="code" value={c.code} />
+            <input type="hidden" name="f" value={f} />
+            <b style={{ gridColumn: "1/-1" }}>{c.name}</b>
+            <label style={{ fontSize: 13, display: "grid", gap: 4 }}>Contacto<input name="supplierContact" defaultValue={c.supplierContact ?? ""} /></label>
+            <label style={{ fontSize: 13, display: "grid", gap: 4 }}>Correo<input name="supplierEmail" type="email" defaultValue={c.supplierEmail ?? ""} /></label>
+            <label style={{ fontSize: 13, display: "grid", gap: 4 }}>Teléfono / WhatsApp<input name="supplierPhone" defaultValue={c.supplierPhone ?? ""} /></label>
+            <label style={{ fontSize: 13, display: "grid", gap: 4 }}>Página web<input name="supplierWeb" defaultValue={c.supplierWeb ?? ""} /></label>
+            <label style={{ fontSize: 13, display: "grid", gap: 4, gridColumn: "1/-1" }}>Notas<textarea name="supplierNotes" rows={3} defaultValue={c.supplierNotes ?? ""} /></label>
+            <div style={{ gridColumn: "1/-1" }}><button className="btn sm">Guardar contacto</button></div>
+          </form>
+        ))}
+      </div>
     </AdminShell>
   );
 }

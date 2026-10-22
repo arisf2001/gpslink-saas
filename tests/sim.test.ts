@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { carrierFor, daysLeft, validIccid } from "../lib/sim/carriers";
+import { carrierFor, countryEs, daysLeft, validIccid } from "../lib/sim/carriers";
 import { cardExpiry, telebayDate, type TelebayCard } from "../lib/sim/telebay";
 
 test("the carrier is recognized by the longest ICCID prefix", () => {
@@ -34,4 +34,11 @@ test("Telebay dates are China time and the expiry is the latest package end", ()
   const card = { iccid: "1", endTime: null, zyCardPackageDTO: [{ endTime: "2027-03-01 00:00:00" }, { endTime: "2027-09-01 00:00:00" }] } as unknown as TelebayCard;
   assert.equal(cardExpiry(card)?.toISOString(), "2027-08-31T16:00:00.000Z");
   assert.equal(cardExpiry({ iccid: "2", endTime: null, zyCardPackageDTO: [] } as unknown as TelebayCard), null);
+});
+
+test("country names from the provider are shown in Spanish", () => {
+  assert.equal(countryEs("多米尼加共和国"), "República Dominicana");
+  assert.equal(countryEs("美利坚合众国"), "Estados Unidos");
+  assert.equal(countryEs("Narnia"), "Narnia");
+  assert.equal(countryEs(null), "");
 });
