@@ -1,11 +1,16 @@
 {
   "interactionModel": {
     "languageModel": {
-      "invocationName": "gps link",
+      "invocationName": "g. p. s. link",
       "intents": [
         {
           "name": "PreguntaIntent",
-          "slots": [{ "name": "pregunta", "type": "AMAZON.SearchQuery" }],
+          "slots": [
+            {
+              "name": "pregunta",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
           "samples": [
             "dónde está {pregunta}",
             "dónde anda {pregunta}",
@@ -22,11 +27,26 @@
             "busca {pregunta}"
           ]
         },
-        { "name": "AMAZON.HelpIntent", "samples": [] },
-        { "name": "AMAZON.StopIntent", "samples": [] },
-        { "name": "AMAZON.CancelIntent", "samples": [] },
-        { "name": "AMAZON.FallbackIntent", "samples": [] },
-        { "name": "AMAZON.NavigateHomeIntent", "samples": [] }
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        }
       ],
       "types": []
     }
