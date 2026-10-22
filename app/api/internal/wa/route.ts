@@ -1,7 +1,7 @@
 import { checkInternalKey, handleIncoming } from "@/lib/wa";
 import { speech, transcribe } from "@/lib/voice";
 
-// A voice note in gets a voice note back (unless the reply carries a link); text in gets text back.
+// A voice note in gets a voice note back, plus the map link as text; text in gets text back.
 export async function POST(req: Request) {
   if (!checkInternalKey(req.headers.get("x-wa-key"))) return Response.json({ error: "forbidden" }, { status: 403 });
   const body = await req.json().catch(() => ({}));
@@ -13,8 +13,11 @@ export async function POST(req: Request) {
   };
   let text = typeof body.text === "string" ? body.text : "";
   if (voice) text = await transcribe(Buffer.from(body.audio, "base64"), typeof body.mime === "string" ? body.mime : "audio/ogg").catch((e) => (console.error("[wa] transcribe", e), ""));
-  const reply = await handleIncoming(body.companyId, body.phone.replace(/\D/g, ""), text, { voice }).catch(fail);
-  if (!voice || !reply || /https?:\/\//.test(reply)) return Response.json({ reply });
+  const links: string[] = [];
+  const reply = await handleIncoming(body.companyId, body.phone.replace(/\D/g, ""), text, { voice, links }).catch(fail);
+  const link = links.length ? links.join("\n") : null;
+  if (!voice || !reply || /https?:\/\//.test(reply)) return Response.json({ reply: reply && link ? `${reply}\n${link}` : reply });
   const audio = await speech(reply).catch((e) => (console.error("[wa] speech", e), null));
-  return Response.json({ reply, audio: audio?.toString("base64") ?? null });
+  if (!audio) return Response.json({ reply: link ? `${reply}\n${link}` : reply });
+  return Response.json({ reply, audio: audio.toString("base64"), link });
 }

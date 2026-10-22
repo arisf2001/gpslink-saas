@@ -48,6 +48,10 @@ async function handle(entry, m) {
   if (res.audio) {
     const r = await sock.sendMessage(jid, { audio: Buffer.from(res.audio, "base64"), mimetype: "audio/ogg; codecs=opus", ptt: true });
     if (r?.key?.id) entry.sentByBot.add(r.key.id);
+    if (res.link) {
+      const l = await sock.sendMessage(jid, { text: res.link });
+      if (l?.key?.id) entry.sentByBot.add(l.key.id);
+    }
   } else if (res.reply) {
     await sleep(1500 + Math.min(res.reply.length * 15, 4000));
     const r = await sock.sendMessage(jid, { text: res.reply });

@@ -105,7 +105,7 @@ async function linkFromProfile(phone: string): Promise<boolean> {
   return true;
 }
 
-export async function handleIncoming(companyId: string, phone: string, text: string, opts: { voice?: boolean } = {}): Promise<string | null> {
+export async function handleIncoming(companyId: string, phone: string, text: string, opts: { voice?: boolean; links?: string[] } = {}): Promise<string | null> {
   const owner = companyId === OWNER_WA;
   const direct = companyId === DIRECT_WA || owner;
   const company = direct ? null : await prisma.company.findUnique({ where: { id: companyId } });
@@ -154,6 +154,8 @@ export async function handleIncoming(companyId: string, phone: string, text: str
   });
   let reply = result.reply;
   if (!opts.voice) for (const a of result.actions) if ("url" in a && a.url && !reply.includes(a.url)) reply += `\n${a.label}: ${a.url}`;
+  // Voice replies: the map link travels as a separate text message after the voice note.
+  if (opts.voice && opts.links) for (const a of result.actions) if (a.type === "open_map") opts.links.push(`${a.label}: ${a.url}`);
   if (result.confirm) reply += "\n\nPara confirmar responde con tu PIN (tienes 2 minutos) o escribe CANCELAR.";
   return reply;
 }
