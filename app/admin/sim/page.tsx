@@ -8,7 +8,7 @@ import { countryEs, daysLeft, ensureCarriers, SIM_STATUS, statusLabel } from "@/
 import { dailyReportData, NOTICE_DAYS, REACTIVATION_NOTE } from "@/lib/sim/notify";
 import { telebayConfigured } from "@/lib/sim/telebay";
 import { AdminShell } from "../admin-shell";
-import { linkSimAction, markDoneAction, saveCarrierAction, saveSupplierAction, syncNowAction } from "./actions";
+import { linkSimAction, markDoneAction, saveCarrierAction, simCommandAction, saveSupplierAction, syncNowAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -81,7 +81,34 @@ function Days({ card, now }: { card: SimCard; now: Date }) {
   return <span style={{ color, fontWeight: 700, whiteSpace: "nowrap" }}>{d <= 0 ? "Vencida" : `${d} ${d === 1 ? "día" : "días"}`}</span>;
 }
 
-function SimTable({ cards, now, agencies, sort }: { cards: SimCard[]; now: Date; agencies: Map<string, string>; sort?: { col?: string; orden?: string; href: (col: string, orden: string) => string } }) {
+const COMMANDS: Record<number, { op: string; label: string; note: string; danger?: boolean }> = {
+  1: { op: "activate", label: "Activar plan", note: "Su plan de 12 meses empieza a contar desde hoy, aunque el equipo no esté instalado." },
+  2: { op: "suspend", label: "Suspender", note: "El equipo se queda sin internet hasta que la reactives.", danger: true },
+  3: { op: "resume", label: "Reactivar", note: "El equipo vuelve a tener internet." },
+};
+
+function SimCommand({ card, back }: { card: SimCard; back: string }) {
+  const c = COMMANDS[card.status];
+  if (!c) return null;
+  return (
+    <details>
+      <summary className={`btn sm ${c.danger ? "red" : "s"}`} style={{ listStyle: "none", whiteSpace: "nowrap" }}>{c.label}</summary>
+      <form action={simCommandAction} style={{ display: "grid", gap: 6, width: 230, marginTop: 8 }}>
+        <input type="hidden" name="iccid" value={card.iccid} />
+        <input type="hidden" name="op" value={c.op} />
+        <input type="hidden" name="back" value={back} />
+        <b>{c.label} la SIM {card.iccid}</b>
+        <span className="hint">{card.deviceName ?? "Sin equipo"} · {c.note}</span>
+        <label className="hint">Para confirmar, escribe los últimos 4 números del ICCID
+          <input name="confirm" inputMode="numeric" maxLength={4} pattern="\d{4}" required autoComplete="off" />
+        </label>
+        <button className={`btn sm ${c.danger ? "red" : "dark"}`}>Confirmar</button>
+      </form>
+    </details>
+  );
+}
+
+function SimTable({ cards, now, agencies, sort, back }: { cards: SimCard[]; now: Date; agencies: Map<string, string>; back: string; sort?: { col?: string; orden?: string; href: (col: string, orden: string) => string } }) {
   const head = (col: string, label: string) => {
     if (!sort) return label;
     const on = sort.orden && (sort.col || "dias") === col ? sort.orden : null;
@@ -93,9 +120,9 @@ function SimTable({ cards, now, agencies, sort }: { cards: SimCard[]; now: Date;
   };
   return (
     <table className="t">
-      <thead><tr><th>{head("iccid", "ICCID")}</th><th>{head("estado", "Estado")}</th><th>{head("vehiculo", "Vehículo · cliente")}</th><th>{head("plan", "Plan · uso")}</th><th>{head("vence", "Vence")}</th><th>{head("dias", "Le quedan")}</th></tr></thead>
+      <thead><tr><th>{head("iccid", "ICCID")}</th><th>{head("estado", "Estado")}</th><th>{head("vehiculo", "Vehículo · cliente")}</th><th>{head("plan", "Plan · uso")}</th><th>{head("vence", "Vence")}</th><th>{head("dias", "Le quedan")}</th><th>Acción</th></tr></thead>
       <tbody>
-        {cards.length === 0 && <tr><td colSpan={6} className="hint">No hay SIM en esta lista.</td></tr>}
+        {cards.length === 0 && <tr><td colSpan={7} className="hint">No hay SIM en esta lista.</td></tr>}
         {cards.map((c) => (
           <tr key={c.iccid}>
             <td><a href={`https://web.telebay.cn/#/?iccid=${c.iccid}&lang=es`} target="_blank" rel="noreferrer">{c.iccid}</a><div className="hint">{countryEs(c.country)}</div></td>
@@ -104,6 +131,7 @@ function SimTable({ cards, now, agencies, sort }: { cards: SimCard[]; now: Date;
             <td>{c.packageName ?? "—"}<div className="hint">{c.usedMb.toFixed(2)} de {c.totalMb} MB</div></td>
             <td>{c.expiresAt ? formatDate(c.expiresAt) : "—"}</td>
             <td><Days card={c} now={now} /></td>
+            <td><SimCommand card={c} back={back} /></td>
           </tr>
         ))}
       </tbody>
@@ -111,7 +139,7 @@ function SimTable({ cards, now, agencies, sort }: { cards: SimCard[]; now: Date;
   );
 }
 
-export default async function SimPage({ searchParams }: { searchParams: Promise<{ f?: string; ok?: string; error?: string } & Filters> }) {
+export default async function SimPage({ searchParams }: { searchParams: Promise<{ f?: string; ok?: string; error?: string; msg?: string } & Filters> }) {
   if (!(await getSession("admin"))) redirect("/admin");
   const sp = await searchParams;
   const { f = "hoy", ok, error, q = "" } = sp;
@@ -130,6 +158,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
     u.set("orden", orden);
     return `/admin/sim?${u}`;
   };
+  const back = `/admin/sim?${new URLSearchParams(Object.entries(sp).filter((e): e is [string, string] => typeof e[1] === "string" && !!e[1] && !["ok", "error", "msg"].includes(e[0])))}`;
   const countries = [...new Set(all.map((c) => countryEs(c.country)).filter(Boolean))].sort();
   const filtering = [sp.q, sp.estado, sp.vence, sp.cia, sp.equipo, sp.tipo, sp.pais].some((v) => v?.trim());
   const counts = { active: all.filter((c) => c.status === 2).length, linked: all.filter((c) => c.deviceId).length };
@@ -145,7 +174,8 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
       {error === "sync" && <div className="err" style={{ margin: "10px 0" }}>No pudimos leer las SIM del proveedor. Inténtalo en unos minutos.</div>}
       {error === "link" && <div className="err" style={{ margin: "10px 0" }}>Revisa el ICCID y el número del equipo (ID de GPS Link).</div>}
       {error === "precio" && <div className="err" style={{ margin: "10px 0" }}>Precio o prefijo no válido.</div>}
-      {ok && <div className="ok" style={{ margin: "10px 0" }}>{ok === "sync" ? "SIM actualizadas." : ok === "link" ? "SIM unida al equipo." : ok === "done" ? "Marcada como reactivada; le avisamos al cliente." : ok === "suplidor" ? "Contacto del suplidor guardado." : "Precios guardados."}</div>}
+      {error === "cmd" && <div className="err" style={{ margin: "10px 0" }}>No se hizo el cambio: {sp.msg}</div>}
+      {ok && <div className="ok" style={{ margin: "10px 0" }}>{ok === "cmd" ? `${sp.msg ?? ""} El estado puede tardar unos minutos en cambiar.` : ok === "sync" ? "SIM actualizadas." : ok === "link" ? "SIM unida al equipo." : ok === "done" ? "Marcada como reactivada; le avisamos al cliente." : ok === "suplidor" ? "Contacto del suplidor guardado." : "Precios guardados."}</div>}
 
       <div className="tabs" style={{ margin: "14px 0 10px" }}>
         {TABS.map(([k, label]) => (
@@ -208,7 +238,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
             </form>
           )}
           {f === "todas" && <p className="hint" style={{ marginBottom: 8 }}>Mostrando {filtered.length} de {all.length} SIM.</p>}
-          <SimTable cards={f === "vencer" ? sortCards([...report.expired, ...report.soon], sp.col, sp.orden) : filtered} now={now} agencies={agencies} sort={{ col: sp.col, orden: sp.orden, href: sortHref }} />
+          <SimTable cards={f === "vencer" ? sortCards([...report.expired, ...report.soon], sp.col, sp.orden) : filtered} now={now} agencies={agencies} back={back} sort={{ col: sp.col, orden: sp.orden, href: sortHref }} />
         </div>
       )}
 
@@ -242,7 +272,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
             <input name="deviceId" placeholder="ID del equipo" inputMode="numeric" style={{ width: 130 }} />
             <button className="btn sm">Unir</button>
           </form>
-          <SimTable cards={sortCards(report.noDevice, sp.col, sp.orden)} now={now} agencies={agencies} sort={{ col: sp.col, orden: sp.orden, href: sortHref }} />
+          <SimTable cards={sortCards(report.noDevice, sp.col, sp.orden)} now={now} agencies={agencies} back={back} sort={{ col: sp.col, orden: sp.orden, href: sortHref }} />
         </div>
       )}
 

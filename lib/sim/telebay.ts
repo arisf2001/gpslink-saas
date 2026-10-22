@@ -1,4 +1,4 @@
-// Telebay / Global IoT open API. Read-only here: token + paged card list. Credentials stay on the server.
+// Telebay / Global IoT open API: token, paged card list and single-card commands. Credentials stay on the server.
 const BASE = (process.env.TELEBAY_URL ?? "https://web.telebay.cn/global-iot-api").replace(/\/$/, "");
 
 type Res<T> = { code: number; msg: string; data: T };
@@ -59,6 +59,17 @@ export async function telebayCards(): Promise<TelebayCard[]> {
   }
   return out;
 }
+
+async function call<T>(path: string, body: unknown): Promise<Res<T>> {
+  const r = await post<T>(path, body, await token());
+  return r.code === 401 || r.code === 403 ? post<T>(path, body, await token(true)) : r;
+}
+
+// optType "0" suspends, "1" resumes. Telebay must enable this permission per account.
+export const telebaySwitch = (iccid: string, optType: "0" | "1") => call<unknown>("/open/switchCardStatus", { iccid, optType });
+
+// Starts the card's pending built-in package now (its 12 months start counting).
+export const telebayActivate = (iccid: string) => call<unknown>("/open/activateComesPackage", { iccid });
 
 // Telebay dates are China time ("2027-05-31 23:59:59").
 export function telebayDate(value: string | null | undefined): Date | null {
