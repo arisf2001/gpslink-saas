@@ -2,7 +2,11 @@ import type { RowDataPacket } from "mysql2/promise";
 import { prisma } from "../db";
 import { isMock, withGpswoxDb } from "../gpswox";
 import { carrierFor, ensureCarriers, statusLabel } from "./carriers";
+import { currentPackage, newsimCards, newsimConfigured, newsimLogin, newsimPackages, newsimStatus, packageEs } from "./newsim";
 import { cardExpiry, cardPackage, telebayCards, telebayConfigured, telebayDate, type TelebayCard } from "./telebay";
+
+// Providers without Telebay's package list pass the plan name and expiry already computed.
+type SyncCard = TelebayCard & { pkg?: string | null; expiry?: Date | null };
 
 type DeviceOwner = { deviceId: number; deviceName: string; simNumber: string; userId: number | null; email: string | null; phone: string | null };
 
@@ -54,7 +58,7 @@ export async function recordEvent(iccid: string, kind: string, detail: string) {
   await prisma.simEvent.create({ data: { iccid, kind, detail } });
 }
 
-export async function applyCards(cards: TelebayCard[], carrierCode: string, owners: DeviceOwner[], now = new Date()) {
+export async function applyCards(cards: SyncCard[], carrierCode: string, owners: DeviceOwner[], now = new Date()) {
   const summary = { cards: cards.length, created: 0, changed: 0, linked: 0 };
   const carriers = await ensureCarriers();
   const known = new Map((await prisma.simCard.findMany()).map((c) => [c.iccid, c]));
@@ -71,11 +75,11 @@ export async function applyCards(cards: TelebayCard[], carrierCode: string, owne
       imsi: card.imsi,
       imei: card.imei,
       status: Number(card.status) || 0,
-      packageName: cardPackage(card),
+      packageName: card.pkg !== undefined ? card.pkg : cardPackage(card),
       totalMb: Number(card.totalFlow) || 0,
       usedMb: Number(card.usedFlow) || 0,
       activatedAt: telebayDate(card.activationTime),
-      expiresAt: cardExpiry(card),
+      expiresAt: card.expiry !== undefined ? card.expiry : cardExpiry(card),
       country: card.countryName,
       lastSyncAt: now,
       goneAt: null,
@@ -112,4 +116,32 @@ export async function syncSims(now = new Date()) {
   if (!telebayConfigured()) return null;
   const [cards, owners] = await Promise.all([telebayCards(), devicesWithSim()]);
   return applyCards(cards, "telebay", owners, now);
+}
+
+// Read-only: logs in to newsimcloud, reads every eSIM and its packages, never changes anything there.
+export async function syncNewsim(now = new Date()) {
+  if (!newsimConfigured()) return null;
+  const token = await newsimLogin();
+  const [list, owners] = await Promise.all([newsimCards(token), devicesWithSim()]);
+  const cards: SyncCard[] = [];
+  for (const c of list) {
+    const { current, next } = currentPackage(c.jtcid ? await newsimPackages(token, c.jtcid) : []);
+    const name = packageEs(current?.salesName ?? c.saleName);
+    cards.push({
+      iccid: c.iccid,
+      imei: null,
+      imsi: null,
+      msisdn: c.msisdn,
+      activationTime: c.activateTime,
+      status: newsimStatus(c.status),
+      totalFlow: Number(current?.dataControl) || 0,
+      usedFlow: Number(current?.useFlow ?? c.useFlow) || 0,
+      countryName: null,
+      endTime: null,
+      pkg: name && next ? `${name} · luego ${packageEs(next.salesName)}` : name,
+      expiry: telebayDate(current?.expireTime),
+    });
+    await new Promise((ok) => setTimeout(ok, 150));
+  }
+  return applyCards(cards, "newsimcloud", owners, now);
 }

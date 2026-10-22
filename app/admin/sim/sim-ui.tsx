@@ -9,7 +9,7 @@ export const COMMANDS: Record<number, { op: string; label: string; note: string;
 
 export function SimCommand({ card, back }: { card: SimCard; back: string }) {
   const c = COMMANDS[card.status];
-  if (!c) return null;
+  if (!c || card.carrierCode !== "telebay") return null;
   return (
     <details>
       <summary className={`btn sm ${c.danger ? "red" : "s"}`} style={{ listStyle: "none", whiteSpace: "nowrap" }}>{c.label}</summary>

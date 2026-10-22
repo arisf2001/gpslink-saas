@@ -12,7 +12,12 @@ export const SIM_STATUS: Record<number, string> = {
 
 export const statusLabel = (s: number) => SIM_STATUS[s] ?? `Estado ${s}`;
 
-const DEFAULTS = [{ code: "telebay", name: "Telebay (Global IoT)", iccidPrefixes: "898522" }];
+export const NEWSIM = "newsimcloud";
+
+const DEFAULTS = [
+  { code: "telebay", name: "Telebay (Global IoT)", iccidPrefixes: "898522" },
+  { code: NEWSIM, name: "newsimcloud (eSIM)", iccidPrefixes: "894453853210" },
+];
 
 export async function ensureCarriers(): Promise<SimCarrier[]> {
   for (const c of DEFAULTS) await prisma.simCarrier.upsert({ where: { code: c.code }, create: c, update: {} });

@@ -4,8 +4,8 @@ import type { SimCard } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { formatDate, formatMoney } from "@/lib/format";
 import { getSession } from "@/lib/session";
-import { countryEs, daysLeft, ensureCarriers, SIM_STATUS, statusLabel } from "@/lib/sim/carriers";
-import { dailyReportData, NOTICE_DAYS, REACTIVATION_NOTE } from "@/lib/sim/notify";
+import { countryEs, daysLeft, ensureCarriers, NEWSIM, SIM_STATUS, statusLabel } from "@/lib/sim/carriers";
+import { dailyReportData, lastNewsimSync, NEWSIM_EVERY_DAYS, NOTICE_DAYS, REACTIVATION_NOTE } from "@/lib/sim/notify";
 import { telebayConfigured } from "@/lib/sim/telebay";
 import { AdminShell } from "../admin-shell";
 import { linkSimAction, markDoneAction, saveSupplierAction, syncNowAction } from "./actions";
@@ -123,6 +123,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
   const carriers = await ensureCarriers();
   const all = await prisma.simCard.findMany({ where: { goneAt: null }, orderBy: [{ expiresAt: "asc" }, { iccid: "asc" }] });
   const report = await dailyReportData(now);
+  const esimSync = all.some((c) => c.carrierCode === NEWSIM) ? await lastNewsimSync() : null;
   const pending = await prisma.simRenewal.findMany({ where: { status: "PAID" }, orderBy: { paidAt: "asc" } });
   const agencies = new Map((await prisma.company.findMany({ select: { id: true, name: true } })).map((c) => [c.id, c.name]));
   const lastSync = all.reduce<Date | null>((m, c) => (!m || c.lastSyncAt > m ? c.lastSyncAt : m), null);
@@ -145,9 +146,10 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
         <h1 className="page-title">Tarjetas SIM</h1>
         <form action={syncNowAction}><button className="btn sm s">Actualizar ahora</button></form>
       </div>
-      <p className="hint">{all.length} SIM · {counts.active} activas · {counts.linked} unidas a un equipo · última actualización {lastSync ? when(lastSync) : "nunca"}. Se actualiza sola cada hora y el reporte te llega por correo cada mañana.</p>
+      <p className="hint">{all.length} SIM · {counts.active} activas · {counts.linked} unidas a un equipo · última actualización {lastSync ? when(lastSync) : "nunca"}. Telebay se actualiza sola cada hora y el reporte te llega por correo cada mañana.{esimSync && ` Las eSIM de newsimcloud se leen cada ${NEWSIM_EVERY_DAYS} días (última: ${when(esimSync.createdAt)}).`}</p>
       {!telebayConfigured() && <div className="err" style={{ margin: "10px 0" }}>Falta la llave de Telebay en el servidor.</div>}
       {error === "sync" && <div className="err" style={{ margin: "10px 0" }}>No pudimos leer las SIM del proveedor. Inténtalo en unos minutos.</div>}
+      {error === "esim" && <div className="err" style={{ margin: "10px 0" }}>Telebay se actualizó, pero no pudimos leer las eSIM de newsimcloud. Inténtalo en unos minutos.</div>}
       {error === "link" && <div className="err" style={{ margin: "10px 0" }}>Revisa el ICCID y el número del equipo (ID de GPS Link).</div>}
       {error === "precio" && <div className="err" style={{ margin: "10px 0" }}>Precio o prefijo no válido.</div>}
       {error === "cmd" && <div className="err" style={{ margin: "10px 0" }}>No se hizo el cambio: {sp.msg}</div>}

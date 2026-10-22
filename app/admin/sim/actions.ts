@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { parseMoneyToCents } from "@/lib/format";
 import { getSession } from "@/lib/session";
 import { validIccid } from "@/lib/sim/carriers";
-import { markRenewalDone } from "@/lib/sim/notify";
+import { markRenewalDone, runNewsim } from "@/lib/sim/notify";
 import { agencyByDevice, deviceOwner, recordEvent, syncSims } from "@/lib/sim/sync";
 import { telebayActivate, telebaySwitch } from "@/lib/sim/telebay";
 
@@ -36,8 +36,15 @@ export async function syncNowAction() {
     console.error("[sim] sync:", (e as Error).message);
     redirect("/admin/sim?error=sync");
   }
+  let esimFailed = false;
+  try {
+    await runNewsim(new Date(), true);
+  } catch (e) {
+    console.error("[sim] newsimcloud:", (e as Error).message);
+    esimFailed = true;
+  }
   revalidatePath("/admin/sim");
-  redirect("/admin/sim?ok=sync");
+  redirect(esimFailed ? "/admin/sim?error=esim" : "/admin/sim?ok=sync");
 }
 
 export async function linkSimAction(formData: FormData) {
@@ -112,7 +119,7 @@ export async function simCommandAction(formData: FormData) {
   const go: (q: string, msg: string) => never = (q, msg) => redirect(`${base}&${q}&msg=${encodeURIComponent(msg)}`);
   const cmd = COMMANDS[String(formData.get("op") ?? "") as keyof typeof COMMANDS];
   const card = validIccid(iccid) ? await prisma.simCard.findUnique({ where: { iccid } }) : null;
-  if (!cmd || !card || !cmd.from.includes(card.status)) go("error=cmd", "esa acción no corresponde al estado actual de la SIM.");
+  if (!cmd || !card || card.carrierCode !== "telebay" || !cmd.from.includes(card.status)) go("error=cmd", "esa acción no corresponde al estado actual de la SIM.");
   if (String(formData.get("confirm") ?? "").trim() !== iccid.slice(-4)) go("error=cmd", "los 4 números de confirmación no coinciden con el ICCID.");
   let failure: string | null = null;
   try {

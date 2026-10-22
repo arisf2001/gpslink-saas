@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { formatDate, formatMoney } from "@/lib/format";
 import { getSession } from "@/lib/session";
-import { countryEs, daysLeft, statusLabel } from "@/lib/sim/carriers";
+import { countryEs, daysLeft, NEWSIM, statusLabel } from "@/lib/sim/carriers";
 import { AdminShell } from "../../admin-shell";
 import { saveSimInfoAction } from "../actions";
 import { SimCommand } from "../sim-ui";
@@ -44,7 +44,9 @@ export default async function SimCardPage({ params, searchParams }: { params: Pr
         <div><div className="hint">Plan · uso</div>{card.packageName ?? "Sin plan"}<div className="hint">{card.usedMb.toFixed(2)} de {card.totalMb} MB</div></div>
         <div><div className="hint">Vence</div>{formatDate(card.expiresAt)}<div className="hint">{d === null ? "Sin fecha" : d <= 0 ? "Vencida" : `Le quedan ${d} días`}</div></div>
         <div><div className="hint">País · teléfono</div>{countryEs(card.country) || "—"}<div className="hint">{card.msisdn ?? ""}{card.imei ? ` · IMEI ${card.imei}` : ""}</div></div>
-        <div><div className="hint">Telebay</div>{card.tbCustomer ? `Cliente: ${card.tbCustomer}` : "Cuenta principal"}{card.panelOnly && <div className="hint">No llega por la API: no se actualiza sola</div>}<div><a href={`https://web.telebay.cn/#/?iccid=${card.iccid}&lang=es`} target="_blank" rel="noreferrer">Ver consumo en Telebay ↗</a></div></div>
+        {card.carrierCode === NEWSIM ? (
+          <div><div className="hint">Proveedor</div>newsimcloud (eSIM)<div className="hint">Se lee cada 30 días · solo lectura</div><div><a href="http://g.newsimcloud.com/login?redirect=%2Findex" target="_blank" rel="noreferrer">Abrir newsimcloud ↗</a></div></div>
+        ) : <div><div className="hint">Telebay</div>{card.tbCustomer ? `Cliente: ${card.tbCustomer}` : "Cuenta principal"}{card.panelOnly && <div className="hint">No llega por la API: no se actualiza sola</div>}<div><a href={`https://web.telebay.cn/#/?iccid=${card.iccid}&lang=es`} target="_blank" rel="noreferrer">Ver consumo en Telebay ↗</a></div></div>}
         <div><div className="hint">Acción</div><SimCommand card={card} back={self} /></div>
       </div>
 
