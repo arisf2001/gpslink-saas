@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { requireTab } from "@/lib/tabs";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { SiteNav } from "../../site-nav";
@@ -10,6 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function WhatsAppPage() {
   const companyId = await getSession("company");
+  await requireTab("whatsapp");
   if (!companyId) redirect("/cuenta");
   const [company, s, linked, sent] = await Promise.all([
     prisma.company.findUnique({ where: { id: companyId }, select: { aiEnabled: true } }),

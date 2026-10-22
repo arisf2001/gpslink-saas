@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireTab } from "@/lib/tabs";
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { PERIOD_LABELS, STATE_LABELS, addMonths, clientState, dateInputDR, suggestedAmount } from "@/lib/clients";
@@ -21,6 +22,7 @@ const NOTICE_LABELS: Record<string, string> = { due_3: "Vence en 3 días", due_2
 
 export default async function ClientePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ ok?: string; error?: string }> }) {
   const companyId = await getSession("company");
+  await requireTab("clientes");
   if (!companyId) redirect("/cuenta");
   const { id } = await params;
   const { ok, error } = await searchParams;
@@ -40,7 +42,7 @@ export default async function ClientePage({ params, searchParams }: { params: Pr
       <div className="wrap" style={{ maxWidth: 960, paddingBottom: 40 }}>
         <h1 className="page-title">{client.email} <span className={`tag ${tag}`} style={{ verticalAlign: "middle" }}>{label}</span></h1>
         <CuentaNav active="clientes" />
-        <p style={{ marginBottom: 12 }}><Link href="/cuenta/clientes">← Volver a mis clientes</Link></p>
+        <p style={{ marginBottom: 12 }}><Link href="/cuenta/clientes">← Volver a mis clientes</Link> · <Link href={`/cuenta/permisos?cliente=${client.id}`}>Qué ve este cliente en la plataforma</Link></p>
         {ok && OK[ok] && <div className="ok" style={{ marginBottom: 12 }}>{OK[ok]}</div>}
         {error && ERR[error] && <div className="err" style={{ marginBottom: 12 }}>{ERR[error]}</div>}
 

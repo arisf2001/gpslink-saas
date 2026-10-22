@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { requireTab } from "@/lib/tabs";
 import { prisma } from "@/lib/db";
 import { PERIOD_LABELS } from "@/lib/clients";
 import { getSession } from "@/lib/session";
@@ -25,6 +26,7 @@ function PlanFields({ plan }: { plan?: { name: string; priceCents: number; curre
 
 export default async function PlanesPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   const companyId = await getSession("company");
+  await requireTab("planes");
   if (!companyId) redirect("/cuenta");
   const { ok, error } = await searchParams;
   const plans = await prisma.clientPlan.findMany({ where: { companyId }, orderBy: [{ active: "desc" }, { createdAt: "asc" }], include: { _count: { select: { clients: true } } } });

@@ -75,6 +75,8 @@ model Company {
   customDomain         String?        @unique @db.VarChar(100)
   unitPriceCents       Int?
   adminNotes           String?        @db.Text
+  hiddenTabs           String?        @db.VarChar(200)
+  clientPerms          Json?
   activationEnabled    Boolean        @default(false)
   clientPlans          ClientPlan[]
   endClients           EndClient[]

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { requireTab } from "@/lib/tabs";
 import { brandOrigin, brandRootDomain, loginSnippet } from "@/lib/brand-web";
 import { trackerUrl } from "@/lib/config";
 import { prisma } from "@/lib/db";
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function MiWebPage() {
   const companyId = await getSession("company");
+  await requireTab("web");
   if (!companyId) redirect("/cuenta");
   const company = await prisma.company.findUnique({ where: { id: companyId } });
   if (!company) redirect("/cuenta");

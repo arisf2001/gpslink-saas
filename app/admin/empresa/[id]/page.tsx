@@ -6,13 +6,16 @@ import { daysUntil } from "@/lib/lifecycle";
 import { getSession } from "@/lib/session";
 import { blockAction, extendAction, markInvoicePaidAction, mockDeviceAction, setBillingAction, setLimitAction, unblockAction } from "../../actions";
 import { AdminShell } from "../../admin-shell";
-import { enterAccountAction, enterPlatformAction, saveNotesAction, saveProfileAction, setPasswordAction } from "../actions";
+import { enterAccountAction, enterPlatformAction, saveCompanyPermsAction, saveNotesAction, saveProfileAction, saveTabsAction, setPasswordAction } from "../actions";
+import { PermsTable } from "../../../perms-table";
+import { platformPerms } from "@/lib/perms";
+import { TAB_OPTIONS, hiddenTabSet } from "@/lib/tabs";
 import { clientsUnder } from "@/lib/gpswox";
 
 export const dynamic = "force-dynamic";
 
-const OK: Record<string, string> = { pago: "Pago registrado.", bloqueada: "Empresa bloqueada.", desbloqueada: "Empresa desbloqueada.", extendida: "Prueba extendida.", limite: "Límite de equipos cambiado.", equipo: "Equipos de prueba agregados (modo prueba).", "cobro-on": "Cobro activado.", "cobro-off": "Cobro desactivado.", perfil: "Perfil guardado.", clave: "Contraseña cambiada.", "clave-enviada": "Contraseña cambiada y enviada a su correo.", notas: "Notas guardadas." };
-const ERR: Record<string, string> = { dias: "Días no válidos (1 a 400).", limite: "Límite no válido.", vencida: "Tiene facturas vencidas sin pagar: registra el pago primero.", correo: "Correo no válido.", "correo-usado": "Ese correo ya lo usa otra empresa.", precio: "Precio no válido.", subdominio: "Subdominio no válido (3 a 30 letras, números o guiones).", dominio: "Dominio no válido, por ejemplo app.sumarca.com", "dominio-usado": "Ese subdominio o dominio ya lo usa otra empresa.", web: "Dirección web no válida.", clave: "La contraseña debe tener al menos 8 caracteres.", "sin-usuario": "Esta empresa no tiene usuario en la plataforma de rastreo." };
+const OK: Record<string, string> = { pago: "Pago registrado.", bloqueada: "Empresa bloqueada.", desbloqueada: "Empresa desbloqueada.", extendida: "Prueba extendida.", limite: "Límite de equipos cambiado.", equipo: "Equipos de prueba agregados (modo prueba).", "cobro-on": "Cobro activado.", "cobro-off": "Cobro desactivado.", perfil: "Perfil guardado.", clave: "Contraseña cambiada.", "clave-enviada": "Contraseña cambiada y enviada a su correo.", notas: "Notas guardadas.", permisos: "Permisos guardados en su plataforma de rastreo.", pestanas: "Pestañas guardadas." };
+const ERR: Record<string, string> = { dias: "Días no válidos (1 a 400).", limite: "Límite no válido.", vencida: "Tiene facturas vencidas sin pagar: registra el pago primero.", correo: "Correo no válido.", "correo-usado": "Ese correo ya lo usa otra empresa.", precio: "Precio no válido.", subdominio: "Subdominio no válido (3 a 30 letras, números o guiones).", dominio: "Dominio no válido, por ejemplo app.sumarca.com", "dominio-usado": "Ese subdominio o dominio ya lo usa otra empresa.", web: "Dirección web no válida.", clave: "La contraseña debe tener al menos 8 caracteres.", "sin-usuario": "Esta empresa no tiene usuario en la plataforma de rastreo.", plataforma: "No se pudo conectar con la plataforma de rastreo." };
 
 export default async function EmpresaPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ ok?: string; error?: string; msg?: string }> }) {
   if (!(await getSession("admin"))) redirect("/admin");
@@ -32,6 +35,8 @@ export default async function EmpresaPage({ params, searchParams }: { params: Pr
   const active = company.devices.filter((d) => !d.removedAt);
   const isMock = process.env.GPSWOX_MODE === "mock";
   const clients = company.gpswoxUserId ? await clientsUnder(company.gpswoxUserId).catch(() => null) : [];
+  const perms = company.gpswoxUserId ? await platformPerms(company.gpswoxUserId, { kind: "reseller" }).catch(() => null) : null;
+  const hiddenTabs = hiddenTabSet(company.hiddenTabs);
 
   return (
     <AdminShell>
@@ -56,9 +61,34 @@ export default async function EmpresaPage({ params, searchParams }: { params: Pr
         <b>Soporte</b>
         <p className="hint">Clientes en su plataforma: {clients === null ? "no se pudo leer" : clients.length} · Equipos activos: {active.length}</p>
         <div className="row" style={{ gap: 10, marginTop: 8, flexWrap: "wrap" }}>
-          <form action={enterPlatformAction} target="_blank"><input type="hidden" name="companyId" value={company.id} /><button className="btn sm" disabled={!company.gpswoxUserId}>Entrar a su plataforma de rastreo</button></form>
-          <form action={enterAccountAction} target="_blank"><input type="hidden" name="companyId" value={company.id} /><button className="btn sm s">Entrar a su cuenta (panel de la marca)</button></form>
+          <form action={enterPlatformAction}><input type="hidden" name="companyId" value={company.id} /><button className="btn sm" disabled={!company.gpswoxUserId}>Entrar a su plataforma de rastreo</button></form>
+          <form action={enterAccountAction}><input type="hidden" name="companyId" value={company.id} /><button className="btn sm s">Entrar a su cuenta (panel de la marca)</button></form>
         </div>
+      </div>
+
+      <div className="grid" style={{ marginTop: 18 }}>
+        <form action={saveCompanyPermsAction} className="panel form" style={{ gridColumn: "1 / -1" }}>
+          <b>Qué ve esta empresa en su plataforma de rastreo</b>
+          <span className="hint">Lo que apagues aquí tampoco lo podrán ver ni usar sus clientes: la empresa solo puede dar a sus clientes lo que tú le permites.</span>
+          <input type="hidden" name="companyId" value={company.id} />
+          {perms?.current ? (
+            <>
+              <PermsTable available={perms.available} current={perms.current} />
+              <button className="btn sm" style={{ justifySelf: "start" }}>Guardar permisos</button>
+            </>
+          ) : <span className="err">{company.gpswoxUserId ? "No se pudo leer su plataforma de rastreo." : "Esta empresa no tiene usuario en la plataforma de rastreo."}</span>}
+        </form>
+        <form action={saveTabsAction} className="panel form" style={{ gridColumn: "1 / -1" }}>
+          <b>Pestañas de su cuenta (panel de la marca)</b>
+          <span className="hint">Desmarca lo que no quieres que vea en su cuenta.</span>
+          <input type="hidden" name="companyId" value={company.id} />
+          <div className="row" style={{ gap: 16, flexWrap: "wrap" }}>
+            {TAB_OPTIONS.map(([key, label]) => (
+              <label key={key} style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 6 }}><input type="checkbox" name={`tab:${key}`} defaultChecked={!hiddenTabs.has(key)} style={{ width: 18, height: 18 }} /> {label}</label>
+            ))}
+          </div>
+          <button className="btn sm" style={{ justifySelf: "start" }}>Guardar pestañas</button>
+        </form>
       </div>
 
       <div className="grid" style={{ marginTop: 18 }}>

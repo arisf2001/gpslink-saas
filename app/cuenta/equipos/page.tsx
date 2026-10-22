@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireTab } from "@/lib/tabs";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { alertSetting, deviceStatuses, problems, type DeviceStatus } from "@/lib/device-status";
@@ -12,6 +13,7 @@ export const dynamic = "force-dynamic";
 
 export default async function EquiposPage({ searchParams }: { searchParams: Promise<{ f?: string }> }) {
   const companyId = await getSession("company");
+  await requireTab("equipos");
   const company = companyId ? await prisma.company.findUnique({ where: { id: companyId } }) : null;
   if (!company) redirect("/cuenta");
   const { f = "todos" } = await searchParams;

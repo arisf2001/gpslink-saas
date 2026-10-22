@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireTab } from "@/lib/tabs";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { STATE_LABELS, clientState, syncClientsThrottled } from "@/lib/clients";
@@ -15,6 +16,7 @@ const FILTERS = { todos: "Todos", vencer: "Por vencer", bloqueados: "Bloqueados"
 
 export default async function ClientesPage({ searchParams }: { searchParams: Promise<{ f?: string; ok?: string; error?: string }> }) {
   const companyId = await getSession("company");
+  await requireTab("clientes");
   const company = companyId ? await prisma.company.findUnique({ where: { id: companyId } }) : null;
   if (!company) redirect("/cuenta");
   const { f = "todos", ok, error } = await searchParams;

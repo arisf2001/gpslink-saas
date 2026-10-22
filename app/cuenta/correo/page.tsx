@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { requireTab } from "@/lib/tabs";
 import { brandMail, type BrandMail } from "@/lib/brand-mail";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
@@ -18,6 +19,7 @@ const ERR: Record<string, string> = {
 
 export default async function CorreoPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const companyId = await getSession("company");
+  await requireTab("correo");
   if (!companyId) redirect("/cuenta");
   const company = await prisma.company.findUnique({ where: { id: companyId } });
   if (!company) redirect("/cuenta");

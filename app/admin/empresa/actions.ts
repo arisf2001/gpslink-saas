@@ -10,6 +10,8 @@ import { appUrl } from "@/lib/config";
 import { prisma } from "@/lib/db";
 import { parseMoneyToCents } from "@/lib/format";
 import { resellerLoginUrl } from "@/lib/gpswox";
+import { permSetFromForm, platformPerms } from "@/lib/perms";
+import { TAB_OPTIONS } from "@/lib/tabs";
 import { emailHtml, sendEmail } from "@/lib/notify";
 import { getSession, setSession } from "@/lib/session";
 import { trackSsoToken } from "@/lib/track-sso";
@@ -110,4 +112,23 @@ export async function enterPlatformAction(formData: FormData) {
   const company = await loadCompany(formData);
   if (!company.gpswoxUserId) back(company.id, "error=sin-usuario");
   redirect(`${await platformOriginFor(company.gpswoxUserId)}/gpslink-sso?t=${encodeURIComponent(trackSsoToken(company.gpswoxUserId))}`);
+}
+
+export async function saveCompanyPermsAction(formData: FormData) {
+  const company = await loadCompany(formData);
+  if (!company.gpswoxUserId) back(company.id, "error=sin-usuario");
+  let failed = false;
+  try {
+    await platformPerms(company.gpswoxUserId, { kind: "reseller" }, permSetFromForm(formData));
+  } catch {
+    failed = true;
+  }
+  back(company.id, failed ? "error=plataforma" : "ok=permisos");
+}
+
+export async function saveTabsAction(formData: FormData) {
+  const company = await loadCompany(formData);
+  const hidden = TAB_OPTIONS.map(([key]) => key).filter((key) => formData.get(`tab:${key}`) !== "on");
+  await prisma.company.update({ where: { id: company.id }, data: { hiddenTabs: hidden.length ? hidden.join(",") : null } });
+  back(company.id, "ok=pestanas");
 }

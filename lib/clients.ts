@@ -3,6 +3,7 @@ import { prisma } from "./db";
 import { formatDate, formatMoney } from "./format";
 import { clientsUnder, setUserActive } from "./gpswox";
 import { reminderDayFor } from "./lifecycle";
+import { isPermSet, platformPerms } from "./perms";
 import { emailHtml, sendEmail } from "./notify";
 import { queueWa } from "./wa";
 
@@ -58,7 +59,11 @@ export const STATE_LABELS: Record<ClientState, [string, string]> = {
 export async function syncClients(company: Company, now = new Date()): Promise<void> {
   if (!company.gpswoxUserId) return;
   const found = await clientsUnder(company.gpswoxUserId);
+  const known = new Set((await prisma.endClient.findMany({ where: { companyId: company.id }, select: { gpswoxUserId: true } })).map((c) => c.gpswoxUserId));
   for (const c of found) {
+    if (!known.has(c.id) && c.managerId === company.gpswoxUserId && isPermSet(company.clientPerms)) {
+      await platformPerms(company.gpswoxUserId, { kind: "client", id: c.id }, company.clientPerms).catch((e) => console.error("[clientes] permisos:", (e as Error).message));
+    }
     const data = { managerId: c.managerId, email: c.email, phone: c.phone, isDealer: c.isDealer, devices: c.devices };
     await prisma.endClient.upsert({
       where: { companyId_gpswoxUserId: { companyId: company.id, gpswoxUserId: c.id } },
