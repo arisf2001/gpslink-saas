@@ -4,6 +4,7 @@ import { redZoneEngineReply } from "./red-zones";
 import { aiSetting, confirmCommand, rateLimit, resolveUser, type AiUser } from "./ai/assistant";
 import { chat } from "./ai/engine";
 import { prisma } from "./db";
+import { userApiHash, usersByPhone } from "./gpswox";
 
 const secret = () => {
   const value = process.env.SESSION_SECRET;
@@ -88,10 +89,28 @@ export async function linkPhone(companyId: string, phone: string, user: AiUser) 
   await prisma.waLink.upsert({ where: { companyId_phone: { companyId, phone } }, create: { companyId, phone, ...data }, update: data });
 }
 
+async function linkFromProfile(phone: string): Promise<boolean> {
+  const ids = await usersByPhone(phone).catch(() => []);
+  const link = await prisma.waLink.findUnique({ where: { companyId_phone: { companyId: OWNER_WA, phone } } });
+  if (ids.length !== 1) {
+    if (link) await prisma.waLink.delete({ where: { id: link.id } });
+    return false;
+  }
+  if (link?.gpswoxUserId === ids[0] && unseal(link.hashSealed)) return true;
+  const hash = await userApiHash(ids[0]).catch(() => null);
+  const user = hash ? await resolveUser(hash).catch(() => null) : null;
+  if (!user) return false;
+  await linkPhone(OWNER_WA, phone, user);
+  return true;
+}
+
 export async function handleIncoming(companyId: string, phone: string, text: string): Promise<string | null> {
-  const direct = companyId === DIRECT_WA;
+  const owner = companyId === OWNER_WA;
+  const direct = companyId === DIRECT_WA || owner;
   const company = direct ? null : await prisma.company.findUnique({ where: { id: companyId } });
   if (direct ? !(await aiSetting()).enabled : !company || !company.aiEnabled || company.status === "BLOCKED" || company.status === "CANCELED") return null;
+  // The owner's business number only answers platform users, matched by the phone in their profile (no linking step).
+  if (owner && !(await linkFromProfile(phone))) return null;
   const brand = company?.name ?? "GPS Link";
   const message = text.trim().slice(0, 1000);
   if (!message) return "Por ahora solo entiendo mensajes de texto.";
@@ -107,7 +126,7 @@ export async function handleIncoming(companyId: string, phone: string, text: str
     await prisma.waLink.delete({ where: { id: link.id } });
     return connectMsg("Tu sesión venció. Conecta tu cuenta otra vez aquí:");
   }
-  if ((user.company?.id ?? DIRECT_WA) !== companyId) return null;
+  if (owner ? user.company?.aiEnabled === false : (user.company?.id ?? DIRECT_WA) !== companyId) return null;
 
   const engine = /^(encender|apagar)[.!]*$/i.exec(message);
   if (engine) {

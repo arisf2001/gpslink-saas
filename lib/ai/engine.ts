@@ -169,6 +169,31 @@ export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => 
   return { tools, find };
 }
 
+// Sends one vehicle's location to the customer's own WhatsApp (profile number + linked numbers). Used by the assistant and Google Home.
+export async function sendLocationWhatsApp(user: AiUser, v: gps.Vehicle, lang: Lang): Promise<{ status: "sent"; to: string } | { error: string }> {
+  const { DIRECT_WA, queueWa, waNumber } = await import("../wa");
+  const { sendWhatsApp } = await import("../notify");
+  const { userPhone } = await import("../gpswox");
+  const brandId = user.company && user.company.status !== "CANCELED" ? user.company.id : null;
+  const targets = new Map<string, string>();
+  const profile = waNumber(await userPhone(user.userId).catch(() => null));
+  if (profile) targets.set(profile, brandId ?? DIRECT_WA);
+  for (const l of await prisma.waLink.findMany({ where: { gpswoxUserId: user.userId } })) if (!targets.has(l.phone)) targets.set(l.phone, l.companyId);
+  if (!targets.size) return { error: "This account has no WhatsApp number: tell the customer to add their WhatsApp number (with country code) in their profile on the tracking platform, then ask again." };
+  const place = await reverseGeocode(v.lat, v.lng, lang);
+  const where = place ? [place.street, place.neighbourhood, place.city, place.state].filter(Boolean).join(", ") : v.address ?? `${v.lat}, ${v.lng}`;
+  const near = place?.near ? `${t(lang, "Cerca de", "Near")}: ${[place.nearKind, place.near].filter(Boolean).join(" ")}${place.nearStreet ? ` (${place.nearStreet})` : ""}, ${place.nearMeters} m` : "";
+  const ago = timeAgo(minutesAgo(v.timestamp), lang);
+  const text = [`*${v.name}${v.plate ? ` (${v.plate})` : ""}*`, `${t(lang, "Ubicación", "Location")}: ${where}`, near, `${t(lang, "Velocidad", "Speed")}: ${v.speed} ${v.speedUnit}`, ago ? `${t(lang, "Último reporte", "Last report")}: ${t(lang, "hace", "")} ${ago}${t(lang, "", " ago")}`.replace(/\s+/g, " ") : "", gps.mapUrl(v.lat, v.lng)].filter(Boolean).join("\n");
+  const sentTo: string[] = [];
+  for (const [phone, companyId] of targets) {
+    const viaBrand = companyId !== DIRECT_WA && (await queueWa(companyId, phone, text).catch(() => false));
+    const ok = viaBrand || (await sendWhatsApp(phone, text).catch(() => ({ ok: false }))).ok;
+    if (ok) sentTo.push(`…${phone.slice(-4)}`);
+  }
+  return sentTo.length ? { status: "sent", to: `WhatsApp ending in ${sentTo.join(", ")}` } : { error: "The WhatsApp message could not be sent now (WhatsApp not connected). Tell the customer to try later." };
+}
+
 export async function chat(input: { user: AiUser; conversationId: string | null; message: string; lang: Lang; deviceId: number | null; channel: Channel }): Promise<ChatResult> {
   const { user, lang, channel } = input;
   const setting = await aiSetting();
@@ -226,27 +251,7 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
   tools.send_location_whatsapp = async ({ device_id }) => {
     const v = await find(Number(device_id));
     if (!v) return { error: "Vehicle not found among the customer's vehicles" };
-    const { DIRECT_WA, queueWa, waNumber } = await import("../wa");
-    const { sendWhatsApp } = await import("../notify");
-    const { userPhone } = await import("../gpswox");
-    const brandId = user.company && user.company.status !== "CANCELED" ? user.company.id : null;
-    const targets = new Map<string, string>();
-    const profile = waNumber(await userPhone(user.userId).catch(() => null));
-    if (profile) targets.set(profile, brandId ?? DIRECT_WA);
-    for (const l of await prisma.waLink.findMany({ where: { gpswoxUserId: user.userId } })) if (!targets.has(l.phone)) targets.set(l.phone, l.companyId);
-    if (!targets.size) return { error: "This account has no WhatsApp number: tell the customer to add their WhatsApp number (with country code) in their profile on the tracking platform, then ask again." };
-    const place = await reverseGeocode(v.lat, v.lng, lang);
-    const where = place ? [place.street, place.neighbourhood, place.city, place.state].filter(Boolean).join(", ") : v.address ?? `${v.lat}, ${v.lng}`;
-    const near = place?.near ? `${t(lang, "Cerca de", "Near")}: ${[place.nearKind, place.near].filter(Boolean).join(" ")}${place.nearStreet ? ` (${place.nearStreet})` : ""}, ${place.nearMeters} m` : "";
-    const ago = timeAgo(minutesAgo(v.timestamp), lang);
-    const text = [`*${v.name}${v.plate ? ` (${v.plate})` : ""}*`, `${t(lang, "Ubicación", "Location")}: ${where}`, near, `${t(lang, "Velocidad", "Speed")}: ${v.speed} ${v.speedUnit}`, ago ? `${t(lang, "Último reporte", "Last report")}: ${t(lang, "hace", "")} ${ago}${t(lang, "", " ago")}`.replace(/\s+/g, " ") : "", gps.mapUrl(v.lat, v.lng)].filter(Boolean).join("\n");
-    const sentTo: string[] = [];
-    for (const [phone, companyId] of targets) {
-      const viaBrand = companyId !== DIRECT_WA && (await queueWa(companyId, phone, text).catch(() => false));
-      const ok = viaBrand || (await sendWhatsApp(phone, text).catch(() => ({ ok: false }))).ok;
-      if (ok) sentTo.push(`…${phone.slice(-4)}`);
-    }
-    return sentTo.length ? { status: "sent", to: `WhatsApp ending in ${sentTo.join(", ")}` } : { error: "The WhatsApp message could not be sent now (WhatsApp not connected). Tell the customer to try later." };
+    return sendLocationWhatsApp(user, v, lang);
   };
   const VOICE_BLOCKED = ["request_engine_command", "activate_red_zone"];
   if (voice) for (const name of VOICE_BLOCKED) delete tools[name];

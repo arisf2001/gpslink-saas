@@ -388,3 +388,13 @@ export async function userApiHash(userId: number): Promise<string | null> {
   });
 }
 
+// Active platform users whose profile phone is this WhatsApp number (digits with country code).
+export async function usersByPhone(phone: string): Promise<number[]> {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length < 8 || isMock()) return [];
+  const { waNumber } = await import("./wa");
+  return withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT id, phone_number FROM users WHERE active = 1 AND phone_number LIKE ?", [`%${digits.slice(-7)}`]);
+    return rows.filter((r) => waNumber(String(r.phone_number)) === digits).map((r) => Number(r.id));
+  });
+}

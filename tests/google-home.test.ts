@@ -7,6 +7,7 @@ test("vehicles are security panels with ignition and battery", () => {
   assert.equal(d.id, "44");
   assert.equal(d.type, "action.devices.types.SECURITYSYSTEM");
   assert.ok(d.traits.includes("action.devices.traits.ArmDisarm"));
+  assert.ok(d.traits.includes("action.devices.traits.Locator"));
   assert.deepEqual(d.name.nicknames, ["G123"]);
   assert.equal(d.attributes.queryOnlyOnOff, true);
 });

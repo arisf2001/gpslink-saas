@@ -1,16 +1,18 @@
 import { verifyPin, type AiUser } from "./ai/assistant";
+import { sendLocationWhatsApp } from "./ai/engine";
 import * as gps from "./ai/gps";
 import { prisma } from "./db";
 import { deviceStatuses, type DeviceStatus } from "./device-status";
 import { revokeByAccess } from "./oauth";
 
 // Google Home cloud-to-cloud integration: each vehicle is a security panel (armed = engine blocked, PIN required),
-// with query-only ignition (OnOff) and GPS battery (EnergyStorage) for routines. No location: Google Home has no trait for it.
-type Input = { intent: string; payload?: { devices?: { id: string }[]; commands?: { devices: { id: string }[]; execution: { command: string; params?: { arm?: boolean }; challenge?: { pin?: string } }[] }[] } };
+// with query-only ignition (OnOff) and GPS battery (EnergyStorage) for routines. Google Home has no GPS location trait:
+// "Where is X?" (Locator) sends the location to the customer's own WhatsApp instead.
+type Input = { intent: string; payload?: { devices?: { id: string }[]; commands?: { devices: { id: string }[]; execution: { command: string; params?: { arm?: boolean; silence?: boolean; lang?: string }; challenge?: { pin?: string } }[] }[] } };
 export type SmartHomeRequest = { requestId: string; inputs: Input[] };
 
 const PANEL = "action.devices.types.SECURITYSYSTEM";
-const TRAITS = ["action.devices.traits.ArmDisarm", "action.devices.traits.OnOff", "action.devices.traits.EnergyStorage"];
+const TRAITS = ["action.devices.traits.ArmDisarm", "action.devices.traits.OnOff", "action.devices.traits.EnergyStorage", "action.devices.traits.Locator"];
 
 export function deviceFor(v: Pick<gps.Vehicle, "id" | "name" | "plate">) {
   return {
@@ -83,6 +85,12 @@ export async function smartHome(req: SmartHomeRequest, user: AiUser, accessToken
         for (const { id } of cmd.devices) {
           const v = mine.get(id);
           if (!v) { commands.push({ ids: [id], status: "ERROR", errorCode: "deviceNotFound" }); continue; }
+          if (ex.command === "action.devices.commands.Locate") {
+            if (ex.params?.silence) { commands.push({ ids: [id], status: "SUCCESS" }); continue; }
+            const sent = await sendLocationWhatsApp(user, v, ex.params?.lang?.startsWith("en") ? "en" : "es").catch(() => ({ error: "send failed" }));
+            commands.push("status" in sent ? { ids: [id], status: "SUCCESS", states: { generatedAlert: true } } : { ids: [id], status: "ERROR", errorCode: "transientError" });
+            continue;
+          }
           if (ex.command !== "action.devices.commands.ArmDisarm") { commands.push({ ids: [id], status: "ERROR", errorCode: "functionNotSupported" }); continue; }
           const lock = ex.params?.arm === true;
           const pin = ex.challenge?.pin;
