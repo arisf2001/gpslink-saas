@@ -92,6 +92,22 @@ export async function createZoneConfirm(user: AiUser, zoneId: string, zoneName: 
   return { token, command: "zone_activate", device_id: 0, device_name: zoneName, requires_pin: true };
 }
 
+// PIN check with the same lockout as the assistant (used by Google Home's PIN challenge).
+export async function verifyPin(userId: number, pin: string): Promise<"ok" | "wrong" | "locked" | "none"> {
+  const now = new Date();
+  const record = await prisma.aiPin.findUnique({ where: { gpswoxUserId: userId } });
+  if (!record) return "none";
+  if (record.lockedUntil && record.lockedUntil > now) return "locked";
+  if (!(await bcrypt.compare(pin, record.pinHash))) {
+    const failed = record.failed + 1;
+    const locked = failed >= MAX_PIN_ATTEMPTS;
+    await prisma.aiPin.update({ where: { gpswoxUserId: userId }, data: locked ? { failed: 0, lockedUntil: new Date(now.getTime() + LOCK_MINUTES * 60_000) } : { failed } });
+    return locked ? "locked" : "wrong";
+  }
+  await prisma.aiPin.update({ where: { gpswoxUserId: userId }, data: { failed: 0, lockedUntil: null } });
+  return "ok";
+}
+
 export async function confirmCommand(user: AiUser, token: string, pin: string, channel: Channel, lang: Lang): Promise<{ ok: boolean; reply: string }> {
   const now = new Date();
   const pending = await prisma.aiConfirm.findUnique({ where: { id: sha(token) } });
