@@ -76,6 +76,28 @@ export async function saveSupplierAction(formData: FormData) {
   redirect(`/admin/sim?f=${encodeURIComponent(String(formData.get("f") ?? "hoy"))}&ok=suplidor#suplidor`);
 }
 
+export async function saveSimInfoAction(formData: FormData) {
+  await requireAdmin();
+  const iccid = String(formData.get("iccid") ?? "").trim();
+  if (!validIccid(iccid)) redirect("/admin/sim?f=todas");
+  const back = String(formData.get("back") ?? "");
+  const self = `/admin/sim/${iccid}?back=${encodeURIComponent(back)}`;
+  const text = (k: string, max: number) => String(formData.get(k) ?? "").trim().slice(0, max) || null;
+  const price = (k: string): number | null | false => {
+    const v = String(formData.get(k) ?? "").trim();
+    return v === "" ? null : (parseMoneyToCents(v) ?? false);
+  };
+  const renewCents = price("renew");
+  const reactivateCents = price("reactivate");
+  if (renewCents === false || reactivateCents === false) redirect(`${self}&error=precio`);
+  await prisma.simCard.update({
+    where: { iccid },
+    data: { nickname: text("nickname", 190)?.replace(/\s+/g, " ") ?? null, customerName: text("customerName", 190), notes: text("notes", 5000), renewCents, reactivateCents },
+  });
+  revalidatePath("/admin/sim");
+  redirect(`${self}&ok=info`);
+}
+
 const COMMANDS = {
   activate: { from: [1], label: "Activar plan", run: (iccid: string) => telebayActivate(iccid) },
   suspend: { from: [2], label: "Suspender", run: (iccid: string) => telebaySwitch(iccid, "0") },
@@ -86,7 +108,7 @@ export async function simCommandAction(formData: FormData) {
   await requireAdmin();
   const iccid = String(formData.get("iccid") ?? "").trim();
   const back = String(formData.get("back") ?? "");
-  const base = back.startsWith("/admin/sim?") ? back : "/admin/sim?f=todas";
+  const base = back.startsWith("/admin/sim") && !back.startsWith("//") ? back : "/admin/sim?f=todas";
   const go: (q: string, msg: string) => never = (q, msg) => redirect(`${base}&${q}&msg=${encodeURIComponent(msg)}`);
   const cmd = COMMANDS[String(formData.get("op") ?? "") as keyof typeof COMMANDS];
   const card = validIccid(iccid) ? await prisma.simCard.findUnique({ where: { iccid } }) : null;

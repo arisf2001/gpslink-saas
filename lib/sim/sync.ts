@@ -79,6 +79,7 @@ export async function applyCards(cards: TelebayCard[], carrierCode: string, owne
       country: card.countryName,
       lastSyncAt: now,
       goneAt: null,
+      panelOnly: false,
       ...(!manual && owner ? { companyId: agencyOf.get(owner.deviceId) ?? null } : {}),
       ...(!manual && owner
         ? { deviceId: owner.deviceId, deviceName: owner.deviceName, ownerUserId: owner.userId, ownerEmail: owner.email, ownerPhone: owner.phone, linkSource: "auto" }

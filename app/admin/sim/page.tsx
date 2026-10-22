@@ -8,7 +8,8 @@ import { countryEs, daysLeft, ensureCarriers, SIM_STATUS, statusLabel } from "@/
 import { dailyReportData, NOTICE_DAYS, REACTIVATION_NOTE } from "@/lib/sim/notify";
 import { telebayConfigured } from "@/lib/sim/telebay";
 import { AdminShell } from "../admin-shell";
-import { linkSimAction, markDoneAction, saveCarrierAction, simCommandAction, saveSupplierAction, syncNowAction } from "./actions";
+import { linkSimAction, markDoneAction, saveCarrierAction, saveSupplierAction, syncNowAction } from "./actions";
+import { SimCommand } from "./sim-ui";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,7 @@ const SORT_COLS: Record<string, (c: SimCard) => string | number | null> = {
   iccid: (c) => c.iccid,
   estado: (c) => statusLabel(c.status),
   vehiculo: (c) => c.deviceName?.trim().toLowerCase() || null,
+  apodo: (c) => c.nickname?.trim().toLowerCase() || null,
   plan: (c) => c.usedMb,
   vence: (c) => c.expiresAt?.getTime() ?? null,
   dias: (c) => c.expiresAt?.getTime() ?? null,
@@ -56,7 +58,7 @@ function sortCards(cards: SimCard[], col = "dias", orden?: string): SimCard[] {
 function applyFilters(cards: SimCard[], fl: Filters, now: Date): SimCard[] {
   const q = fl.q?.trim().toLowerCase();
   return cards.filter((c) => {
-    if (q && ![c.iccid, c.msisdn, c.imei, c.deviceName, c.ownerEmail, c.ownerPhone].some((v) => v?.toLowerCase().includes(q))) return false;
+    if (q && ![c.iccid, c.msisdn, c.imei, c.deviceName, c.ownerEmail, c.ownerPhone, c.nickname, c.customerName, c.tbCustomer].some((v) => v?.toLowerCase().includes(q))) return false;
     if (fl.estado && String(c.status) !== fl.estado) return false;
     if (fl.cia && c.carrierCode !== fl.cia) return false;
     if (fl.pais && countryEs(c.country) !== fl.pais) return false;
@@ -81,33 +83,6 @@ function Days({ card, now }: { card: SimCard; now: Date }) {
   return <span style={{ color, fontWeight: 700, whiteSpace: "nowrap" }}>{d <= 0 ? "Vencida" : `${d} ${d === 1 ? "día" : "días"}`}</span>;
 }
 
-const COMMANDS: Record<number, { op: string; label: string; note: string; danger?: boolean }> = {
-  1: { op: "activate", label: "Activar plan", note: "Su plan de 12 meses empieza a contar desde hoy, aunque el equipo no esté instalado." },
-  2: { op: "suspend", label: "Suspender", note: "El equipo se queda sin internet hasta que la reactives.", danger: true },
-  3: { op: "resume", label: "Reactivar", note: "El equipo vuelve a tener internet." },
-};
-
-function SimCommand({ card, back }: { card: SimCard; back: string }) {
-  const c = COMMANDS[card.status];
-  if (!c) return null;
-  return (
-    <details>
-      <summary className={`btn sm ${c.danger ? "red" : "s"}`} style={{ listStyle: "none", whiteSpace: "nowrap" }}>{c.label}</summary>
-      <form action={simCommandAction} style={{ display: "grid", gap: 6, width: 230, marginTop: 8 }}>
-        <input type="hidden" name="iccid" value={card.iccid} />
-        <input type="hidden" name="op" value={c.op} />
-        <input type="hidden" name="back" value={back} />
-        <b>{c.label} la SIM {card.iccid}</b>
-        <span className="hint">{card.deviceName ?? "Sin equipo"} · {c.note}</span>
-        <label className="hint">Para confirmar, escribe los últimos 4 números del ICCID
-          <input name="confirm" inputMode="numeric" maxLength={4} pattern="\d{4}" required autoComplete="off" />
-        </label>
-        <button className={`btn sm ${c.danger ? "red" : "dark"}`}>Confirmar</button>
-      </form>
-    </details>
-  );
-}
-
 function SimTable({ cards, now, agencies, sort, back }: { cards: SimCard[]; now: Date; agencies: Map<string, string>; back: string; sort?: { col?: string; orden?: string; href: (col: string, orden: string) => string } }) {
   const head = (col: string, label: string) => {
     if (!sort) return label;
@@ -120,14 +95,15 @@ function SimTable({ cards, now, agencies, sort, back }: { cards: SimCard[]; now:
   };
   return (
     <table className="t">
-      <thead><tr><th>{head("iccid", "ICCID")}</th><th>{head("estado", "Estado")}</th><th>{head("vehiculo", "Vehículo · cliente")}</th><th>{head("plan", "Plan · uso")}</th><th>{head("vence", "Vence")}</th><th>{head("dias", "Le quedan")}</th><th>Acción</th></tr></thead>
+      <thead><tr><th>{head("iccid", "ICCID")}</th><th>{head("estado", "Estado")}</th><th>{head("vehiculo", "Vehículo · cliente")}</th><th>{head("apodo", "Apodo / nota")}</th><th>{head("plan", "Plan · uso")}</th><th>{head("vence", "Vence")}</th><th>{head("dias", "Le quedan")}</th><th>Acción</th></tr></thead>
       <tbody>
-        {cards.length === 0 && <tr><td colSpan={7} className="hint">No hay SIM en esta lista.</td></tr>}
+        {cards.length === 0 && <tr><td colSpan={8} className="hint">No hay SIM en esta lista.</td></tr>}
         {cards.map((c) => (
           <tr key={c.iccid}>
-            <td><a href={`https://web.telebay.cn/#/?iccid=${c.iccid}&lang=es`} target="_blank" rel="noreferrer">{c.iccid}</a><div className="hint">{countryEs(c.country)}</div></td>
+            <td><Link href={`/admin/sim/${c.iccid}?back=${encodeURIComponent(back)}`} title="Abrir ficha de la SIM">{c.iccid}</Link><div className="hint">{countryEs(c.country)}</div></td>
             <td>{statusLabel(c.status)}</td>
             <td>{c.deviceName ?? <span className="hint">Sin equipo</span>}<div className="hint">{c.companyId ? `Agencia: ${agencies.get(c.companyId) ?? ""}` : c.deviceId ? "Cliente directo" : ""}{c.ownerEmail ? ` · ${c.ownerEmail}` : ""}</div></td>
+            <td>{c.nickname ?? <span className="hint">—</span>}{c.customerName && <div className="hint">Cliente: {c.customerName}</div>}{c.tbCustomer && <div className="hint">Cliente en Telebay: {c.tbCustomer}</div>}{c.panelOnly && <div className="hint">No se actualiza sola</div>}</td>
             <td>{c.packageName ?? "—"}<div className="hint">{c.usedMb.toFixed(2)} de {c.totalMb} MB</div></td>
             <td>{c.expiresAt ? formatDate(c.expiresAt) : "—"}</td>
             <td><Days card={c} now={now} /></td>

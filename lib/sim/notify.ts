@@ -21,9 +21,9 @@ export async function quote(card: SimCard, now = new Date()) {
   if (!carrier) return null;
   const reactivation = card.status === 3 || (!!card.expiresAt && card.expiresAt <= now);
   const agency = !!card.companyId;
-  const renew = agency ? carrier.agencyRenewCents : carrier.renewCents;
+  const renew = card.renewCents ?? (agency ? carrier.agencyRenewCents : carrier.renewCents);
   if (renew <= 0) return null;
-  const react = agency ? carrier.agencyReactivateCents : carrier.reactivateCents;
+  const react = card.reactivateCents ?? (agency ? carrier.agencyReactivateCents : carrier.reactivateCents);
   return { carrier, agency, reactivation, amountCents: renew + (reactivation ? react : 0), currency: carrier.currency };
 }
 

@@ -459,6 +459,13 @@ model SimCard {
   ownerPhone  String?
   companyId   String?
   linkSource  String?
+  nickname    String?   @db.VarChar(190)
+  tbCustomer  String?
+  panelOnly   Boolean   @default(false)
+  customerName String?  @db.VarChar(190)
+  notes       String?   @db.Text
+  renewCents  Int?
+  reactivateCents Int?
   firstSeenAt DateTime  @default(now())
   lastSyncAt  DateTime  @default(now())
   goneAt      DateTime?
