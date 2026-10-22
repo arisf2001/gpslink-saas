@@ -7,8 +7,9 @@ import { getSession } from "@/lib/session";
 import { countryEs, daysLeft, ensureCarriers, SIM_STATUS, statusLabel } from "@/lib/sim/carriers";
 import { dailyReportData, lastProviderSync, MONTHLY_PROVIDERS, NEWSIM_EVERY_DAYS, NOTICE_DAYS, REACTIVATION_NOTE } from "@/lib/sim/notify";
 import { telebayConfigured } from "@/lib/sim/telebay";
+import { simMismatches } from "@/lib/sim/sync";
 import { AdminShell } from "../admin-shell";
-import { linkSimAction, markDoneAction, saveSupplierAction, syncNowAction } from "./actions";
+import { fixMismatchAction, linkSimAction, markDoneAction, saveSupplierAction, syncNowAction } from "./actions";
 import { SimCommand } from "./sim-ui";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,7 @@ const TABS = [
   ["todas", "Todas"],
   ["vencer", "Por vencer"],
   ["pagadas", "Pagadas por reactivar"],
+  ["revisar", "No coinciden"],
   ["sin-equipo", "Sin equipo"],
 ] as const;
 
@@ -126,6 +128,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
   const monthly = (
     await Promise.all(MONTHLY_PROVIDERS.filter((p) => all.some((c) => c.carrierCode === p.code)).map(async (p) => ({ name: p.name, last: await lastProviderSync(p.code) })))
   ).filter((m) => m.last);
+  const mismatches = await simMismatches().catch(() => []);
   const pending = await prisma.simRenewal.findMany({ where: { status: "PAID" }, orderBy: { paidAt: "asc" } });
   const agencies = new Map((await prisma.company.findMany({ select: { id: true, name: true } })).map((c) => [c.id, c.name]));
   const lastSync = all.reduce<Date | null>((m, c) => (!m || c.lastSyncAt > m ? c.lastSyncAt : m), null);
@@ -152,15 +155,16 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
       {!telebayConfigured() && <div className="err" style={{ margin: "10px 0" }}>Falta la llave de Telebay en el servidor.</div>}
       {error === "sync" && <div className="err" style={{ margin: "10px 0" }}>No pudimos leer las SIM del proveedor. Inténtalo en unos minutos.</div>}
       {error === "esim" && <div className="err" style={{ margin: "10px 0" }}>Telebay se actualizó, pero no pudimos leer {sp.prov || "un proveedor"}. Inténtalo en unos minutos.</div>}
+      {error === "revisar" && <div className="err" style={{ margin: "10px 0" }}>No se pudo actualizar: el equipo que tiene esa SIM no está en GPS Link.</div>}
       {error === "link" && <div className="err" style={{ margin: "10px 0" }}>Revisa el ICCID y el número del equipo (ID de GPS Link).</div>}
       {error === "precio" && <div className="err" style={{ margin: "10px 0" }}>Precio o prefijo no válido.</div>}
       {error === "cmd" && <div className="err" style={{ margin: "10px 0" }}>No se hizo el cambio: {sp.msg}</div>}
-      {ok && <div className="ok" style={{ margin: "10px 0" }}>{ok === "cmd" ? `${sp.msg ?? ""} El estado puede tardar unos minutos en cambiar.` : ok === "sync" ? "SIM actualizadas." : ok === "link" ? "SIM unida al equipo." : ok === "done" ? "Marcada como reactivada; le avisamos al cliente." : ok === "suplidor" ? "Contacto del suplidor guardado." : "Precios guardados."}</div>}
+      {ok && <div className="ok" style={{ margin: "10px 0" }}>{ok === "cmd" ? `${sp.msg ?? ""} El estado puede tardar unos minutos en cambiar.` : ok === "sync" ? "SIM actualizadas." : ok === "link" ? "SIM unida al equipo." : ok === "revisar" ? "Ficha del equipo actualizada con su SIM." : ok === "done" ? "Marcada como reactivada; le avisamos al cliente." : ok === "suplidor" ? "Contacto del suplidor guardado." : "Precios guardados."}</div>}
 
       <div className="tabs" style={{ margin: "14px 0 10px" }}>
         {TABS.map(([k, label]) => (
           <Link key={k} href={`/admin/sim?f=${k}`} className={`tab${f === k ? " on" : ""}`}>
-            {label}{k === "vencer" ? ` (${report.soon.length + report.expired.length})` : k === "pagadas" ? ` (${pending.length})` : k === "sin-equipo" ? ` (${report.noDevice.length})` : ""}
+            {label}{k === "vencer" ? ` (${report.soon.length + report.expired.length})` : k === "pagadas" ? ` (${pending.length})` : k === "sin-equipo" ? ` (${report.noDevice.length})` : k === "revisar" ? ` (${mismatches.length})` : ""}
           </Link>
         ))}
       </div>
@@ -236,6 +240,28 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
                   <td>{formatMoney(p.amountCents, p.currency)}{p.reactivation ? " (con reactivación)" : ""}</td>
                   <td>{p.paidAt ? when(p.paidAt) : ""}</td>
                   <td><form action={markDoneAction}><input type="hidden" name="id" value={p.id} /><button className="btn sm dark">Marcar reactivada</button></form></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {f === "revisar" && (
+        <div className="panel">
+          <h2 style={{ fontSize: 17, marginBottom: 6 }}>SIM que no coinciden con su equipo</h2>
+          <p className="hint" style={{ marginBottom: 10 }}>El proveedor dice en qué equipo (IMEI) está cada SIM. Aquí salen las que en GPS Link están en otro equipo o en ninguno. &quot;Actualizar&quot; pone la SIM en la ficha del equipo correcto y la quita del otro.</p>
+          <table className="t">
+            <thead><tr><th>ICCID</th><th>Compañía</th><th>En GPS Link</th><th>El proveedor la ve en</th><th></th></tr></thead>
+            <tbody>
+              {mismatches.length === 0 && <tr><td colSpan={5} className="hint">Todas las SIM coinciden con su equipo.</td></tr>}
+              {mismatches.map((m) => (
+                <tr key={m.iccid}>
+                  <td><Link href={`/admin/sim/${m.iccid}?back=${encodeURIComponent(back)}`}>{m.iccid}</Link></td>
+                  <td>{carriers.find((c) => c.code === m.carrierCode)?.name ?? m.carrierCode}</td>
+                  <td>{m.linkedName ?? <span className="hint">Sin equipo</span>}</td>
+                  <td>{m.actualName ?? <span className="hint">Un equipo que no está en GPS Link</span>}<div className="hint">IMEI {m.imei}</div></td>
+                  <td>{m.actualId ? <form action={fixMismatchAction}><input type="hidden" name="iccid" value={m.iccid} /><button className="btn sm">Actualizar</button></form> : <span className="hint">Créalo en GPS Link</span>}</td>
                 </tr>
               ))}
             </tbody>

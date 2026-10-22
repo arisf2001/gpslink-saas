@@ -177,7 +177,7 @@ export async function syncOnce(now = new Date()) {
 
 const ymd = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 
-// Copies SIM data to the GPS Link device profile, only where the profile is empty or has junk (e.g. a trailing "F").
+// Copies the provider's SIM data to the GPS Link device profile (provider wins when it has a value; junk like a trailing "F" is cleaned).
 export async function fillDeviceProfiles(carrierCode?: string) {
   if (isMock()) return 0;
   const cards = await prisma.simCard.findMany({ where: { goneAt: null, deviceId: { not: null }, ...(carrierCode ? { carrierCode } : {}) } });
@@ -190,9 +190,9 @@ export async function fillDeviceProfiles(carrierCode?: string) {
       const [r] = await conn.execute(
         `UPDATE devices SET
            sim_number = IF(sim_number <> ? AND sim_number LIKE CONCAT(?, '%'), ?, sim_number),
-           msisdn = IF((msisdn IS NULL OR msisdn = '') AND ? IS NOT NULL, ?, msisdn),
-           sim_activation_date = IF((sim_activation_date IS NULL OR sim_activation_date < '1971-01-01') AND ? IS NOT NULL, ?, sim_activation_date),
-           sim_expiration_date = IF((sim_expiration_date IS NULL OR sim_expiration_date < '1971-01-01') AND ? IS NOT NULL, ?, sim_expiration_date)
+           msisdn = IF(? IS NOT NULL, ?, msisdn),
+           sim_activation_date = IF(? IS NOT NULL, ?, sim_activation_date),
+           sim_expiration_date = IF(? IS NOT NULL, ?, sim_expiration_date)
          WHERE id = ?`,
         [c.iccid, c.iccid, c.iccid, c.msisdn, c.msisdn, act, act, exp, exp, c.deviceId],
       );
@@ -217,4 +217,40 @@ export async function refreshOnceQuota() {
     n++;
   }
   return n;
+}
+
+export type SimMismatch = { iccid: string; carrierCode: string; imei: string; linkedId: number | null; linkedName: string | null; actualId: number | null; actualName: string | null };
+
+// The provider sees the SIM inside a device (by IMEI). Compare the first 14 digits (providers report IMEISV / no check digit).
+export async function simMismatches(): Promise<SimMismatch[]> {
+  if (isMock()) return [];
+  const cards = (await prisma.simCard.findMany({ where: { goneAt: null, imei: { not: null } } })).filter((c) => /^\d{14,}$/.test(c.imei ?? ""));
+  if (!cards.length) return [];
+  const prefixes = [...new Set(cards.map((c) => c.imei!.slice(0, 14)))];
+  const linked = [...new Set(cards.map((c) => c.deviceId).filter((id): id is number => !!id))];
+  const rows = await withGpswoxDb(async (conn) => {
+    const [r] = await conn.query<RowDataPacket[]>(
+      `SELECT id, name, imei FROM devices WHERE deleted = 0 AND (LEFT(imei, 14) IN (?)${linked.length ? " OR id IN (?)" : ""})`,
+      linked.length ? [prefixes, linked] : [prefixes],
+    );
+    return r as { id: number; name: string; imei: string }[];
+  });
+  const out: SimMismatch[] = [];
+  for (const c of cards) {
+    const p = c.imei!.slice(0, 14);
+    const actual = rows.find((d) => String(d.imei).slice(0, 14) === p) ?? null;
+    const own = c.deviceId ? rows.find((d) => d.id === c.deviceId) : null;
+    if (own && !/^\d{15}$/.test(String(own.imei)) && !actual) continue;
+    if (actual && actual.id === c.deviceId) continue;
+    out.push({ iccid: c.iccid, carrierCode: c.carrierCode, imei: c.imei!, linkedId: c.deviceId, linkedName: c.deviceName, actualId: actual?.id ?? null, actualName: actual?.name ?? null });
+  }
+  return out;
+}
+
+// Puts the SIM in the device that really has it and clears it from any other device profile.
+export async function moveSimToDevice(iccid: string, deviceId: number) {
+  await withGpswoxDb(async (conn) => {
+    await conn.execute("UPDATE devices SET sim_number = ? WHERE id = ?", [iccid, deviceId]);
+    await conn.execute("UPDATE devices SET sim_number = '' WHERE id <> ? AND sim_number LIKE CONCAT(?, '%')", [deviceId, iccid]);
+  });
 }

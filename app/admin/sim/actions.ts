@@ -7,7 +7,7 @@ import { parseMoneyToCents } from "@/lib/format";
 import { getSession } from "@/lib/session";
 import { validIccid } from "@/lib/sim/carriers";
 import { markRenewalDone, runMonthly } from "@/lib/sim/notify";
-import { agencyByDevice, deviceOwner, recordEvent, syncSims } from "@/lib/sim/sync";
+import { agencyByDevice, deviceOwner, fillDeviceProfiles, moveSimToDevice, recordEvent, simMismatches, syncSims } from "@/lib/sim/sync";
 import { telebayActivate, telebaySwitch } from "@/lib/sim/telebay";
 
 async function requireAdmin() {
@@ -56,6 +56,24 @@ export async function linkSimAction(formData: FormData) {
   await recordEvent(iccid, "device", `Equipo asignado a mano: ${owner.deviceName}`);
   revalidatePath("/admin/sim");
   redirect("/admin/sim?f=sin-equipo&ok=link");
+}
+
+export async function fixMismatchAction(formData: FormData) {
+  await requireAdmin();
+  const iccid = String(formData.get("iccid") ?? "");
+  const m = (await simMismatches()).find((x) => x.iccid === iccid);
+  const owner = m?.actualId ? await deviceOwner(m.actualId).catch(() => null) : null;
+  if (!m || !owner) redirect("/admin/sim?f=revisar&error=revisar");
+  await moveSimToDevice(iccid, owner.deviceId);
+  const agency = (await agencyByDevice()).get(owner.deviceId) ?? null;
+  await prisma.simCard.update({
+    where: { iccid },
+    data: { companyId: agency, deviceId: owner.deviceId, deviceName: owner.deviceName, ownerUserId: owner.userId, ownerEmail: owner.email, ownerPhone: owner.phone, linkSource: "imei" },
+  });
+  await recordEvent(iccid, "device", `SIM pasada a ${owner.deviceName} (el proveedor la ve en ese equipo)${m.linkedName ? `; antes estaba en ${m.linkedName}` : ""}`);
+  await fillDeviceProfiles(m.carrierCode).catch(() => 0);
+  revalidatePath("/admin/sim");
+  redirect("/admin/sim?f=revisar&ok=revisar");
 }
 
 export async function markDoneAction(formData: FormData) {
