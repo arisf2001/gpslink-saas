@@ -4,7 +4,9 @@ import { BRAND } from "@/lib/config";
 import { METHOD_LABELS, STATUS_LABELS, formatDate, formatMoney } from "@/lib/format";
 import { companyPlatformOrigin } from "@/lib/brand-web";
 import { daysUntil } from "@/lib/lifecycle";
-import { getSession } from "@/lib/session";
+import { getSession, getStaffId } from "@/lib/session";
+import { redirect } from "next/navigation";
+import { accountLoginUrl, brandForHost } from "@/lib/brand-host";
 import { getStripe } from "@/lib/stripe";
 import { SiteNav } from "../site-nav";
 import { logoutAction, payAction, removeCardAction, saveCardAction } from "./actions";
@@ -21,6 +23,7 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
   const companyId = await getSession("company");
 
   if (!companyId) {
+    if (await brandForHost()) redirect("/entrar");
     return (
       <>
         <SiteNav />
@@ -62,6 +65,7 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
     prisma.priceTier.findMany({ orderBy: { minDevices: "asc" } }),
   ]);
   const stripeOn = !!process.env.STRIPE_SECRET_KEY;
+  const staff = await getStaffId();
   const trialLeft = daysUntil(company.trialEndsAt, now);
   const open = company.invoices.filter((i) => i.status === "OPEN");
   const contact = `escríbenos a ${BRAND.supportEmail}${BRAND.supportWhatsApp ? ` o al WhatsApp +${BRAND.supportWhatsApp}` : ""}`;
@@ -101,6 +105,7 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
               </>
             )}
             <dt>Código de empresa</dt><dd><b>{company.slug}</b></dd>
+            <dt>Link para entrar a tu cuenta</dt><dd><a href={accountLoginUrl(company)} target="_blank" rel="noreferrer" style={{ color: "var(--p)", fontWeight: 700 }}>{accountLoginUrl(company)}</a><div className="hint">Tú y tus administradores entran aquí.</div></dd>
             <dt>Tu plataforma</dt><dd><a href={`${companyPlatformOrigin(company)}/login`} target="_blank" rel="noreferrer" style={{ color: "var(--p)", fontWeight: 700 }}>{companyPlatformOrigin(company)}</a><div className="hint">Entra con tu correo ({company.email}) y tu contraseña{company.billingEnabled ? "" : " de la plataforma"}. Ahí pones tu logo y colores, y creas tus clientes.</div></dd>
           </dl>
         </div>
@@ -112,15 +117,17 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
             {company.cardPaymentMethodId ? (
               <>
                 <p style={{ margin: "0 0 10px" }}>Tarjeta guardada: <b>{cardLabel(company)}</b>. Cada factura se cobra sola a esta tarjeta el día que sale, y te avisamos.</p>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <form action={saveCardAction}><button className="btn sm">Cambiar tarjeta</button></form>
-                  <form action={removeCardAction}><button className="btn sm s">Quitar tarjeta</button></form>
-                </div>
+                {!staff && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <form action={saveCardAction}><button className="btn sm">Cambiar tarjeta</button></form>
+                    <form action={removeCardAction}><button className="btn sm s">Quitar tarjeta</button></form>
+                  </div>
+                )}
               </>
             ) : (
               <>
                 <p style={{ margin: "0 0 10px" }}>Guarda tu tarjeta y tus facturas se cobran solas cada mes, sin que tengas que entrar a pagar. La tarjeta la guarda Stripe de forma segura; nosotros no vemos el número.</p>
-                <form action={saveCardAction}><button className="btn sm">Guardar tarjeta</button></form>
+                {staff ? <p className="hint">Solo el dueño de la cuenta puede guardar la tarjeta.</p> : <form action={saveCardAction}><button className="btn sm">Guardar tarjeta</button></form>}
               </>
             )}
           </div>

@@ -11,7 +11,7 @@ async function customerFor(stripe: Stripe, company: Company): Promise<string> {
   return id;
 }
 
-export async function startCardSetup(company: Company): Promise<string | null> {
+export async function startCardSetup(company: Company, origin = appUrl()): Promise<string | null> {
   const stripe = getStripe();
   if (!stripe) return null;
   const session = await stripe.checkout.sessions.create({
@@ -21,8 +21,8 @@ export async function startCardSetup(company: Company): Promise<string | null> {
     allowed_payment_method_types: ["card"],
     locale: "es",
     metadata: { kind: "company_card", companyId: company.id },
-    success_url: `${appUrl()}/cuenta?tarjeta=ok&session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${appUrl()}/cuenta?tarjeta=cancelada`,
+    success_url: `${origin}/cuenta?tarjeta=ok&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${origin}/cuenta?tarjeta=cancelada`,
   });
   return session.url;
 }

@@ -51,8 +51,19 @@ export async function clearSession(role: Role) {
   (await cookies()).delete(cookieName(role));
 }
 
+// Company sessions are "<companyId>" for the owner or "<companyId>:<companyUserId>" for an extra admin, who loses access when deactivated.
 export async function getSession(role: Role): Promise<string | null> {
-  return verifyToken((await cookies()).get(cookieName(role))?.value, role);
+  const sub = verifyToken((await cookies()).get(cookieName(role))?.value, role);
+  if (role !== "company" || !sub?.includes(":")) return sub;
+  const [companyId, userId] = sub.split(":");
+  const { prisma } = await import("./db");
+  const user = await prisma.companyUser.findUnique({ where: { id: userId }, select: { companyId: true, active: true } });
+  return user?.active && user.companyId === companyId ? companyId : null;
+}
+
+export async function getStaffId(): Promise<string | null> {
+  const sub = verifyToken((await cookies()).get(cookieName("company"))?.value, "company");
+  return sub?.includes(":") ? sub.split(":")[1] : null;
 }
 
 export function adminCredentialsMatch(username: string, password: string): boolean {

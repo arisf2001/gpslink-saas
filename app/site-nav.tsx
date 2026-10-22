@@ -1,9 +1,35 @@
 import Link from "next/link";
 import { BRAND } from "@/lib/config";
 import { getLang } from "@/lib/lang";
+import { brandForHost } from "@/lib/brand-host";
 
 // `path` turns on the English/Español switch (public pages only).
 export async function SiteNav({ path }: { path?: string } = {}) {
+  const brand = await brandForHost();
+  if (brand) {
+    const color = /^#[0-9a-f]{3,8}$/i.test(brand.site.primary) ? brand.site.primary : "#0F4C5C";
+    const name = brand.site.name || brand.company.name;
+    const accent = /^#[0-9a-f]{3,8}$/i.test(brand.site.secondary) ? brand.site.secondary : "#22c55e";
+    return (
+      <>
+        <style>{`:root{--p:${color};--pd:${color};--g:${accent};--gd:${accent}}`}</style>
+        <nav className="top">
+          <div className="wrap">
+            {/* "/" on a brand domain is its public website, served outside Next. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a href="/" className="brand">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              {brand.site.logo ? <img src={brand.site.logo} alt={name} style={{ height: 38, width: "auto", maxWidth: 200 }} /> : name}
+            </a>
+            <div className="links">
+              <a href="/entrar" style={{ fontWeight: 700, color: "var(--p)" }}>Entrar</a>
+              <a href="/cuenta" style={{ fontWeight: 700, color: "var(--p)" }}>Mi cuenta</a>
+            </div>
+          </div>
+        </nav>
+      </>
+    );
+  }
   const en = (await getLang()) === "en";
   const wa = `https://wa.me/${BRAND.supportWhatsApp.replace(/\D/g, "")}?text=${encodeURIComponent(en ? "Hi, I want information about the GPS Link white label" : "Hola, quiero información sobre la marca blanca de GPS Link")}`;
   return (

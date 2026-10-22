@@ -78,6 +78,14 @@ export async function verifyCompanyLogin(email: string, password: string): Promi
   return (await bcrypt.compare(password, company.passwordHash)) ? company : null;
 }
 
+// The owner of a white label may sign in with their tracking platform credentials.
+export async function verifyPlatformLoginFor(company: Company, email: string, password: string): Promise<boolean> {
+  if (!company.gpswoxUserId) return false;
+  const hash = await platformLogin(email, password).catch(() => null);
+  const info = hash ? await userInfo(hash).catch(() => null) : null;
+  return !!info && (await userIdByEmail(info.email).catch(() => null)) === company.gpswoxUserId;
+}
+
 // White labels created by hand in GPSWOX (before the signup page) log in with their platform credentials.
 // The first time, their account is created linked to their GPSWOX user, with billing off until the owner turns it on.
 export async function verifyResellerLogin(email: string, password: string): Promise<Company | "not_reseller" | null> {

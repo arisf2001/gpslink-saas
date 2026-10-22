@@ -126,8 +126,8 @@ const esc = (v: string) =>
 const color = (v: string, fallback: string) => (/^#[0-9a-f]{6}$/i.test(v) ? v : fallback);
 const safeUrl = (v: string) => (/^https?:\/\/[^\s"'<>]+$/i.test(v) ? v : "");
 
-export function renderSite(site: SiteData, platform: string, preview = false): string {
-  const login = `${platform}/login`;
+export function renderSite(site: SiteData, platform: string, preview = false, loginHref?: string): string {
+  const login = loginHref ?? `${platform}/login`;
   const register = `${platform}/register/create`;
   const logo = (file: string, dark: boolean) =>
     file ? `<img src="${esc(mediaUrl(file))}" alt="${esc(site.name)}">` : `<span class="logo-text">${esc(site.name)}</span>${dark ? "" : ""}`;
