@@ -30,7 +30,16 @@ const EXPIRY = [
   ["sin-fecha", "Sin fecha (plan sin empezar)"],
 ] as const;
 
-type Filters = { q?: string; estado?: string; vence?: string; cia?: string; equipo?: string; tipo?: string; pais?: string };
+type Filters = { q?: string; estado?: string; vence?: string; cia?: string; equipo?: string; tipo?: string; pais?: string; orden?: string };
+
+function sortByDays(cards: SimCard[], orden?: string): SimCard[] {
+  if (orden !== "asc" && orden !== "desc") return cards;
+  const dir = orden === "asc" ? 1 : -1;
+  return [...cards].sort((a, b) => {
+    if (!a.expiresAt || !b.expiresAt) return (a.expiresAt ? 0 : 1) - (b.expiresAt ? 0 : 1);
+    return dir * (a.expiresAt.getTime() - b.expiresAt.getTime());
+  });
+}
 
 function applyFilters(cards: SimCard[], fl: Filters, now: Date): SimCard[] {
   const q = fl.q?.trim().toLowerCase();
@@ -60,10 +69,15 @@ function Days({ card, now }: { card: SimCard; now: Date }) {
   return <span style={{ color, fontWeight: 700, whiteSpace: "nowrap" }}>{d <= 0 ? "Vencida" : `${d} ${d === 1 ? "día" : "días"}`}</span>;
 }
 
-function SimTable({ cards, now, agencies }: { cards: SimCard[]; now: Date; agencies: Map<string, string> }) {
+function SimTable({ cards, now, agencies, sort }: { cards: SimCard[]; now: Date; agencies: Map<string, string>; sort?: { orden?: string; href: (orden: string) => string } }) {
+  const daysHead = sort ? (
+    <Link href={sort.href(sort.orden === "asc" ? "desc" : "asc")} title="Ordenar por días que le quedan" style={{ whiteSpace: "nowrap" }}>
+      Le quedan {sort.orden === "asc" ? "▲" : sort.orden === "desc" ? "▼" : "▲▼"}
+    </Link>
+  ) : "Le quedan";
   return (
     <table className="t">
-      <thead><tr><th>ICCID</th><th>Estado</th><th>Vehículo · cliente</th><th>Plan · uso</th><th>Vence</th><th>Le quedan</th></tr></thead>
+      <thead><tr><th>ICCID</th><th>Estado</th><th>Vehículo · cliente</th><th>Plan · uso</th><th>Vence</th><th>{daysHead}</th></tr></thead>
       <tbody>
         {cards.length === 0 && <tr><td colSpan={6} className="hint">No hay SIM en esta lista.</td></tr>}
         {cards.map((c) => (
@@ -92,7 +106,13 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
   const pending = await prisma.simRenewal.findMany({ where: { status: "PAID" }, orderBy: { paidAt: "asc" } });
   const agencies = new Map((await prisma.company.findMany({ select: { id: true, name: true } })).map((c) => [c.id, c.name]));
   const lastSync = all.reduce<Date | null>((m, c) => (!m || c.lastSyncAt > m ? c.lastSyncAt : m), null);
-  const filtered = applyFilters(all, sp, now);
+  const filtered = sortByDays(applyFilters(all, sp, now), sp.orden);
+  const sortHref = (orden: string) => {
+    const u = new URLSearchParams({ f });
+    for (const k of ["q", "estado", "vence", "cia", "pais", "equipo", "tipo"] as const) if (sp[k]?.trim()) u.set(k, sp[k]!);
+    u.set("orden", orden);
+    return `/admin/sim?${u}`;
+  };
   const countries = [...new Set(all.map((c) => countryEs(c.country)).filter(Boolean))].sort();
   const filtering = [sp.q, sp.estado, sp.vence, sp.cia, sp.equipo, sp.tipo, sp.pais].some((v) => v?.trim());
   const counts = { active: all.filter((c) => c.status === 2).length, linked: all.filter((c) => c.deviceId).length };
@@ -138,6 +158,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
           {f === "todas" && (
             <form className="row" style={{ marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
               <input type="hidden" name="f" value="todas" />
+              {sp.orden && <input type="hidden" name="orden" value={sp.orden} />}
               <input name="q" defaultValue={q} placeholder="Buscar ICCID, IMEI, vehículo, correo o teléfono" style={{ maxWidth: 320 }} />
               <select name="estado" defaultValue={sp.estado ?? ""} aria-label="Estado">
                 <option value="">Cualquier estado</option>
@@ -169,7 +190,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
             </form>
           )}
           {f === "todas" && <p className="hint" style={{ marginBottom: 8 }}>Mostrando {filtered.length} de {all.length} SIM.</p>}
-          <SimTable cards={f === "vencer" ? [...report.expired, ...report.soon] : filtered} now={now} agencies={agencies} />
+          <SimTable cards={f === "vencer" ? sortByDays([...report.expired, ...report.soon], sp.orden) : filtered} now={now} agencies={agencies} sort={{ orden: sp.orden, href: sortHref }} />
         </div>
       )}
 
@@ -203,7 +224,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
             <input name="deviceId" placeholder="ID del equipo" inputMode="numeric" style={{ width: 130 }} />
             <button className="btn sm">Unir</button>
           </form>
-          <SimTable cards={report.noDevice} now={now} agencies={agencies} />
+          <SimTable cards={sortByDays(report.noDevice, sp.orden)} now={now} agencies={agencies} sort={{ orden: sp.orden, href: sortHref }} />
         </div>
       )}
 
