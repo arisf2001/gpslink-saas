@@ -65,17 +65,22 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
   ].filter(Boolean).join("\n");
 }
 
-async function openai(model: string, messages: Msg[], tools: typeof TOOLS, effort: "minimal" | "low") {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("OPENAI_API_KEY no configurada");
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+type Provider = "openai" | "gemini";
+
+async function llm(provider: Provider, model: string, messages: Msg[], tools: typeof TOOLS, effort: "minimal" | "low") {
+  const gemini = provider === "gemini";
+  const key = gemini ? process.env.GEMINI_API_KEY : process.env.OPENAI_API_KEY;
+  if (!key) throw new Error(`${gemini ? "GEMINI" : "OPENAI"}_API_KEY no configurada`);
+  const url = gemini ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" : "https://api.openai.com/v1/chat/completions";
+  const res = await fetch(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, tools, tool_choice: "auto", reasoning_effort: effort }),
+    body: JSON.stringify({ model: gemini ? process.env.GEMINI_MODEL || "gemini-3-flash-preview" : model, messages, tools, tool_choice: "auto", reasoning_effort: effort }),
     signal: AbortSignal.timeout(45_000),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${data?.error?.message ?? "error"}`);
+  const error = Array.isArray(data) ? data[0]?.error : data?.error;
+  if (!res.ok) throw new Error(`${gemini ? "Gemini" : "OpenAI"} ${res.status}: ${error?.message ?? "error"}`);
   return data as { choices: { message: Msg }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
 }
 
@@ -256,11 +261,24 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
   const VOICE_BLOCKED = ["request_engine_command", "activate_red_zone"];
   if (voice) for (const name of VOICE_BLOCKED) delete tools[name];
   const messages: Msg[] = [{ role: "system", content: systemPrompt(config.name, config.companyName, lang, input.deviceId, channel) }, ...past, { role: "user", content: input.message }];
+  // Remote channels (WhatsApp, Alexa) think with Gemini when configured; in-platform chat stays on OpenAI.
+  let provider: Provider = (channel === "whatsapp" || channel === "alexa") && process.env.GEMINI_API_KEY ? "gemini" : "openai";
   let reply = "";
   let tokensIn = 0;
   let tokensOut = 0;
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const data = await openai(setting.model, messages, voice ? TOOLS.filter((x) => !VOICE_BLOCKED.includes(x.function.name)) : TOOLS, voice ? "minimal" : "low");
+    const toolList = voice ? TOOLS.filter((x) => !VOICE_BLOCKED.includes(x.function.name)) : TOOLS;
+    const effort = voice ? "minimal" : "low";
+    let data: Awaited<ReturnType<typeof llm>>;
+    try {
+      data = await llm(provider, setting.model, messages, toolList, effort);
+    } catch (e) {
+      if (provider === "openai") throw e;
+      console.error("[ia] gemini failed, using OpenAI:", e instanceof Error ? e.message : e);
+      provider = "openai";
+      for (const m of messages) if (m.tool_calls) m.tool_calls = m.tool_calls.map(({ id, type, function: f }) => ({ id, type, function: f }));
+      data = await llm(provider, setting.model, messages, toolList, effort);
+    }
     tokensIn += data.usage?.prompt_tokens ?? 0;
     tokensOut += data.usage?.completion_tokens ?? 0;
     const msg = data.choices[0].message;
