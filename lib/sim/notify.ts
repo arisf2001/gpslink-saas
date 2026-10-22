@@ -5,8 +5,8 @@ import { prisma } from "../db";
 import { BRAND, appUrl } from "../config";
 import { formatDate, formatMoney } from "../format";
 import { emailHtml, sendEmail, type ChannelResult } from "../notify";
-import { daysLeft, DAY, NEWSIM, statusLabel } from "./carriers";
-import { syncNewsim, syncSims } from "./sync";
+import { daysLeft, DAY, MONTHLY_CARRIERS, NEWSIM, ONCE, statusLabel } from "./carriers";
+import { syncNewsim, syncOnce, syncSims } from "./sync";
 import { notify } from "../notifications";
 
 export const NOTICE_DAYS = 10;
@@ -138,60 +138,81 @@ export async function sendDailyReport(now = new Date()) {
 
 export const NEWSIM_EVERY_DAYS = 30;
 
-export const lastNewsimSync = () => prisma.simEvent.findFirst({ where: { iccid: NEWSIM, kind: "sync" }, orderBy: { id: "desc" } });
+type Provider = { code: string; name: string; sync: (now: Date) => Promise<{ cards: number; changed: number } | null> };
+export const MONTHLY_PROVIDERS: Provider[] = [
+  { code: NEWSIM, name: "eSIM newsimcloud", sync: syncNewsim },
+  { code: ONCE, name: "1NCE", sync: syncOnce },
+];
+
+export const lastProviderSync = (code: string) => prisma.simEvent.findFirst({ where: { iccid: code, kind: "sync" }, orderBy: { id: "desc" } });
 
 const shortDays = (c: SimCard, now: Date) => {
   const d = daysLeft(c.expiresAt, now);
   return d === null ? "sin fecha" : d <= 0 ? "vencida" : `${d} ${d === 1 ? "día" : "días"}`;
 };
-const esimLine = (c: SimCard, now: Date) =>
+const providerLine = (c: SimCard, now: Date) =>
   `• ${c.iccid} · ${c.nickname ?? c.deviceName ?? "sin equipo"} · ${statusLabel(c.status)} · ${c.packageName ?? "sin plan"} · vence ${formatDate(c.expiresAt)} (${shortDays(c, now)})`;
 
-export async function sendNewsimReport(now = new Date()) {
-  const cards = await prisma.simCard.findMany({ where: { carrierCode: NEWSIM, goneAt: null }, orderBy: [{ expiresAt: "asc" }, { iccid: "asc" }] });
+export async function sendProviderReport(p: Provider, now = new Date()) {
+  const cards = await prisma.simCard.findMany({ where: { carrierCode: p.code, goneAt: null }, orderBy: [{ expiresAt: "asc" }, { iccid: "asc" }] });
   const byStatus = new Map<string, number>();
   for (const c of cards) byStatus.set(statusLabel(c.status), (byStatus.get(statusLabel(c.status)) ?? 0) + 1);
   const soon = cards.filter((c) => c.expiresAt && c.expiresAt.getTime() - now.getTime() <= NOTICE_DAYS * DAY);
   return sendEmail(
     reportTo(),
-    `Reporte eSIM (newsimcloud): ${cards.length} SIM, ${soon.length} vencen en ${NOTICE_DAYS} días o menos`,
+    `Reporte ${p.name}: ${cards.length} SIM, ${soon.length} vencen en ${NOTICE_DAYS} días o menos`,
     emailHtml(
-      `Reporte de eSIM newsimcloud · ${formatDate(now)}`,
+      `Reporte ${p.name} · ${formatDate(now)}`,
       [
         `Total: ${cards.length}. ${[...byStatus].map(([k, v]) => `${k}: ${v}`).join(". ")}.`,
         `Vencidas o vencen en ${NOTICE_DAYS} días o menos: ${soon.length}.`,
-        ...soon.map((c) => esimLine(c, now)),
+        ...soon.map((c) => providerLine(c, now)),
         "Todas:",
-        ...cards.map((c) => esimLine(c, now)),
+        ...cards.map((c) => providerLine(c, now)),
         `Próxima lectura automática: ${formatDate(new Date(now.getTime() + NEWSIM_EVERY_DAYS * DAY))}. Mientras tanto el sistema sigue contando los días y avisa ${NOTICE_DAYS} días antes de cada vencimiento.`,
       ],
-      { label: "Abrir Tarjetas SIM", url: `${appUrl()}/admin/sim?f=todas&cia=${NEWSIM}` },
+      { label: "Abrir Tarjetas SIM", url: `${appUrl()}/admin/sim?f=todas&cia=${p.code}` },
     ),
   );
 }
 
-// Reads newsimcloud only every 30 days (or on demand); expiry countdown and reminders run hourly from the stored dates.
-export async function runNewsim(now = new Date(), force = false) {
+// Monthly providers are read only every 30 days (or on demand); expiry countdown and reminders run hourly from the stored dates.
+export async function runProvider(p: Provider, now = new Date(), force = false) {
   if (!force) {
-    const last = await lastNewsimSync();
+    const last = await lastProviderSync(p.code);
     if (last && now.getTime() - last.createdAt.getTime() < NEWSIM_EVERY_DAYS * DAY) return null;
   }
   try {
-    const summary = await syncNewsim(now);
+    const summary = await p.sync(now);
     if (!summary) return null;
-    await prisma.simEvent.create({ data: { iccid: NEWSIM, kind: "sync", detail: `Lectura de newsimcloud: ${summary.cards} eSIM, ${summary.changed} con cambios` } });
-    await sendNewsimReport(now);
+    await prisma.simEvent.create({ data: { iccid: p.code, kind: "sync", detail: `Lectura de ${p.name}: ${summary.cards} SIM, ${summary.changed} con cambios` } });
+    await sendProviderReport(p, now);
     return summary;
   } catch (e) {
     const msg = (e as Error).message;
-    if (!force) await noticeOnce(NEWSIM, "sync_error", `newsim-error:${dayKey(now)}`, async () => [await sendEmail(reportTo(), "No pudimos leer las eSIM de newsimcloud", emailHtml("No pudimos leer las eSIM de newsimcloud", [msg, "El sistema lo vuelve a intentar cada hora. Los vencimientos guardados siguen contando."]))]);
+    if (!force) await noticeOnce(p.code, "sync_error", `${p.code}-error:${dayKey(now)}`, async () => [await sendEmail(reportTo(), `No pudimos leer las SIM de ${p.name}`, emailHtml(`No pudimos leer las SIM de ${p.name}`, [msg, "El sistema lo vuelve a intentar cada hora. Los vencimientos guardados siguen contando."]))]);
     throw e;
   }
 }
 
+export async function runMonthly(now = new Date(), force = false) {
+  const results: Record<string, unknown> = {};
+  const failed: string[] = [];
+  for (const p of MONTHLY_PROVIDERS) {
+    try {
+      const r = await runProvider(p, now, force);
+      if (r) results[p.code] = r;
+    } catch (e) {
+      console.error(`[sim] ${p.code}:`, (e as Error).message);
+      failed.push(p.name);
+    }
+  }
+  return { results, failed };
+}
+
 // Owner reminder, once per SIM and expiry date, even when no renewal price is set.
 export async function runEsimDueNotices(now = new Date()) {
-  const cards = await prisma.simCard.findMany({ where: { carrierCode: NEWSIM, goneAt: null, expiresAt: { not: null, gt: now, lte: new Date(now.getTime() + NOTICE_DAYS * DAY) } }, orderBy: { expiresAt: "asc" } });
+  const cards = await prisma.simCard.findMany({ where: { carrierCode: { in: MONTHLY_CARRIERS }, goneAt: null, expiresAt: { not: null, gt: now, lte: new Date(now.getTime() + NOTICE_DAYS * DAY) } }, orderBy: { expiresAt: "asc" } });
   const fresh: SimCard[] = [];
   for (const c of cards) {
     try {
@@ -202,15 +223,16 @@ export async function runEsimDueNotices(now = new Date()) {
   if (!fresh.length) return 0;
   await sendEmail(
     reportTo(),
-    `${fresh.length} eSIM vencen en ${NOTICE_DAYS} días o menos`,
-    emailHtml(`Renovar eSIM de newsimcloud`, [`Estas eSIM vencen pronto. Renuévalas en newsimcloud:`, ...fresh.map((c) => esimLine(c, now))], { label: "Abrir Tarjetas SIM", url: `${appUrl()}/admin/sim?f=vencer&cia=${NEWSIM}` }),
+    `${fresh.length} SIM (eSIM/1NCE) vencen en ${NOTICE_DAYS} días o menos`,
+    emailHtml(`Renovar SIM`, [`Estas SIM vencen pronto. Renuévalas con su proveedor:`, ...fresh.map((c) => providerLine(c, now))], { label: "Abrir Tarjetas SIM", url: `${appUrl()}/admin/sim?f=vencer` }),
   );
   return fresh.length;
 }
 
 export async function runSims(now = new Date()) {
   const synced = await syncSims(now);
-  const esim = await runNewsim(now).catch((e) => (console.error("[sim] newsimcloud:", (e as Error).message), null));
+  const monthly = await runMonthly(now);
+  const esim = Object.keys(monthly.results).length ? monthly.results : null;
   const notices = (await runSimNotices(now)) + (await runEsimDueNotices(now));
   const report = synced ? await sendDailyReport(now) : false;
   return { synced, esim, notices, report };

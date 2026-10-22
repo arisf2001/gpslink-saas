@@ -13,10 +13,14 @@ export const SIM_STATUS: Record<number, string> = {
 export const statusLabel = (s: number) => SIM_STATUS[s] ?? `Estado ${s}`;
 
 export const NEWSIM = "newsimcloud";
+export const ONCE = "1nce";
+// Providers read every 30 days (no hourly API), with their own report.
+export const MONTHLY_CARRIERS = [NEWSIM, ONCE];
 
 const DEFAULTS = [
   { code: "telebay", name: "Telebay (Global IoT)", iccidPrefixes: "898522" },
   { code: NEWSIM, name: "newsimcloud (eSIM)", iccidPrefixes: "894453853210" },
+  { code: ONCE, name: "1NCE", iccidPrefixes: "898822806661" },
 ];
 
 export async function ensureCarriers(): Promise<SimCarrier[]> {

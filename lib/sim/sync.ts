@@ -3,10 +3,11 @@ import { prisma } from "../db";
 import { isMock, withGpswoxDb } from "../gpswox";
 import { carrierFor, ensureCarriers, statusLabel } from "./carriers";
 import { currentPackage, newsimCards, newsimConfigured, newsimLogin, newsimPackages, newsimStatus, packageEs } from "./newsim";
+import { onceConfigured, onceImei, onceQuota, onceSims, onceStatus, onceToken } from "./once";
 import { cardExpiry, cardPackage, telebayCards, telebayConfigured, telebayDate, type TelebayCard } from "./telebay";
 
 // Providers without Telebay's package list pass the plan name and expiry already computed.
-type SyncCard = TelebayCard & { pkg?: string | null; expiry?: Date | null };
+type SyncCard = TelebayCard & { pkg?: string | null; expiry?: Date | null; activated?: Date | null };
 
 type DeviceOwner = { deviceId: number; deviceName: string; simNumber: string; userId: number | null; email: string | null; phone: string | null };
 
@@ -78,7 +79,7 @@ export async function applyCards(cards: SyncCard[], carrierCode: string, owners:
       packageName: card.pkg !== undefined ? card.pkg : cardPackage(card),
       totalMb: Number(card.totalFlow) || 0,
       usedMb: Number(card.usedFlow) || 0,
-      activatedAt: telebayDate(card.activationTime),
+      activatedAt: card.activated !== undefined ? card.activated : telebayDate(card.activationTime),
       expiresAt: card.expiry !== undefined ? card.expiry : cardExpiry(card),
       country: card.countryName,
       lastSyncAt: now,
@@ -144,4 +145,32 @@ export async function syncNewsim(now = new Date()) {
     await new Promise((ok) => setTimeout(ok, 150));
   }
   return applyCards(cards, "newsimcloud", owners, now);
+}
+
+// Read-only: 1NCE SIMs with their data quota; expiry comes from the quota (the SIM lifetime).
+export async function syncOnce(now = new Date()) {
+  if (!onceConfigured()) return null;
+  const token = await onceToken();
+  const [list, owners] = await Promise.all([onceSims(token), devicesWithSim()]);
+  const cards: SyncCard[] = [];
+  for (const s of list) {
+    const q = await onceQuota(token, s.iccid).catch(() => null);
+    const total = Number(q?.total_volume) || 0;
+    cards.push({
+      iccid: s.iccid,
+      imei: onceImei(s.imei),
+      imsi: s.imsi,
+      msisdn: s.msisdn,
+      activationTime: s.activation_date,
+      activated: s.activation_date ? new Date(s.activation_date.replace(/\+0000$/, "Z")) : null,
+      status: onceStatus(s.status),
+      totalFlow: total,
+      usedFlow: q?.volume != null ? Math.max(0, total - Number(q.volume)) : 0,
+      countryName: null,
+      endTime: null,
+      pkg: total ? `${total} MB` : null,
+      expiry: q?.expiry_date ? new Date(`${q.expiry_date.replace(" ", "T")}Z`) : null,
+    });
+  }
+  return applyCards(cards, "1nce", owners, now);
 }

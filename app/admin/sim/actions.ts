@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { parseMoneyToCents } from "@/lib/format";
 import { getSession } from "@/lib/session";
 import { validIccid } from "@/lib/sim/carriers";
-import { markRenewalDone, runNewsim } from "@/lib/sim/notify";
+import { markRenewalDone, runMonthly } from "@/lib/sim/notify";
 import { agencyByDevice, deviceOwner, recordEvent, syncSims } from "@/lib/sim/sync";
 import { telebayActivate, telebaySwitch } from "@/lib/sim/telebay";
 
@@ -36,15 +36,9 @@ export async function syncNowAction() {
     console.error("[sim] sync:", (e as Error).message);
     redirect("/admin/sim?error=sync");
   }
-  let esimFailed = false;
-  try {
-    await runNewsim(new Date(), true);
-  } catch (e) {
-    console.error("[sim] newsimcloud:", (e as Error).message);
-    esimFailed = true;
-  }
+  const { failed } = await runMonthly(new Date(), true);
   revalidatePath("/admin/sim");
-  redirect(esimFailed ? "/admin/sim?error=esim" : "/admin/sim?ok=sync");
+  redirect(failed.length ? `/admin/sim?error=esim&prov=${encodeURIComponent(failed.join(", "))}` : "/admin/sim?ok=sync");
 }
 
 export async function linkSimAction(formData: FormData) {
