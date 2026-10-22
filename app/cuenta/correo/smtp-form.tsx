@@ -22,7 +22,8 @@ export function SmtpForm({ current, defaultEmail, action }: { current: BrandSmtp
   const [security, setSecurity] = useState<string>(current?.security ?? preset.security);
   const pick = (p: string) => {
     setProvider(p);
-    if (p !== "otro") {
+    const known = Object.values(PRESETS).some((x) => x.host && x.host === host);
+    if (p !== "otro" || known) {
       setHost(PRESETS[p].host);
       setPort(String(PRESETS[p].port));
       setSecurity(PRESETS[p].security);
