@@ -17,7 +17,7 @@ export function deviceFor(v: Pick<gps.Vehicle, "id" | "name" | "plate" | "group"
     id: String(v.id),
     type: PANEL,
     traits: TRAITS,
-    name: { name: v.name, ...(v.plate ? { nicknames: [v.plate] } : {}) },
+    name: { name: v.name.trim(), ...(v.plate ? { nicknames: [v.plate] } : {}) },
     willReportState: false,
     ...(v.group ? { roomHint: v.group } : {}),
     attributes: { queryOnlyOnOff: true, queryOnlyEnergyStorage: true, isRechargeable: false },
