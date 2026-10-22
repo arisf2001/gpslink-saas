@@ -1,9 +1,11 @@
 import type Stripe from "stripe";
 import { prisma } from "./db";
 import { markInvoicePaid } from "./companies";
+import { applySimCheckout } from "./sim/notify";
 
 // Shared by the webhook and the success redirect; markInvoicePaid is idempotent on the session id.
 export async function applyCheckoutSession(session: Stripe.Checkout.Session) {
+  if (session.metadata?.kind === "sim") return applySimCheckout(session);
   const { companyId, invoiceId } = session.metadata ?? {};
   if (!companyId || !invoiceId || session.payment_status !== "paid" || session.mode !== "payment") return null;
   const invoice = await prisma.invoice.findFirst({ where: { id: invoiceId, companyId } });

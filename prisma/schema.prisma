@@ -419,3 +419,81 @@ model OAuthToken {
 
   @@index([clientId])
 }
+
+// SIM cards bought from mobile carriers (Telebay first). The carrier is recognized by the ICCID prefix; prices are per year.
+model SimCarrier {
+  code            String   @id @db.VarChar(30)
+  name            String
+  iccidPrefixes   String
+  renewCents      Int      @default(0)
+  reactivateCents Int      @default(0)
+  currency        String   @default("usd")
+  active          Boolean  @default(true)
+  updatedAt       DateTime @updatedAt
+}
+
+model SimCard {
+  iccid       String    @id @db.VarChar(25)
+  carrierCode String    @db.VarChar(30)
+  msisdn      String?
+  imsi        String?
+  imei        String?
+  status      Int       @default(0)
+  packageName String?
+  totalMb     Float     @default(0)
+  usedMb      Float     @default(0)
+  activatedAt DateTime?
+  expiresAt   DateTime?
+  country     String?
+  deviceId    Int?
+  deviceName  String?
+  ownerUserId Int?
+  ownerEmail  String?
+  ownerPhone  String?
+  linkSource  String?
+  firstSeenAt DateTime  @default(now())
+  lastSyncAt  DateTime  @default(now())
+  goneAt      DateTime?
+
+  @@index([expiresAt])
+  @@index([deviceId])
+}
+
+model SimEvent {
+  id        Int      @id @default(autoincrement())
+  iccid     String   @db.VarChar(25)
+  kind      String
+  detail    String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([iccid])
+}
+
+model SimRenewal {
+  id            String    @id @default(cuid())
+  token         String    @unique
+  iccid         String    @db.VarChar(25)
+  expiresAt     DateTime?
+  amountCents   Int
+  currency      String    @default("usd")
+  reactivation  Boolean   @default(false)
+  status        String    @default("PENDING")
+  stripeSession String?   @unique
+  paidAt        DateTime?
+  doneAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([iccid])
+  @@index([status])
+}
+
+model SimNotice {
+  id        Int      @id @default(autoincrement())
+  dedupeKey String   @unique
+  iccid     String   @db.VarChar(25)
+  kind      String
+  channels  String   @default("")
+  error     String?  @db.Text
+  createdAt DateTime @default(now())
+}

@@ -15,6 +15,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             <Link href="/admin">Empresas</Link>
             <Link href="/admin/planes">Planes y precios</Link>
             <Link href="/admin/equipos">Equipos</Link>
+            <Link href="/admin/sim">Tarjetas SIM</Link>
             <Link href="/admin/ia">Asistente IA</Link>
             <Link href="/admin/whatsapp">WhatsApp</Link>
             <form action={adminLogoutAction}><button className="btn sm s">Salir</button></form>
