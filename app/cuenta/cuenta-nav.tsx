@@ -6,6 +6,7 @@ const LINKS = [
   { key: "equipos", href: "/cuenta/equipos", label: "Mis equipos" },
   { key: "planes", href: "/cuenta/planes", label: "Mis planes" },
   { key: "whatsapp", href: "/cuenta/whatsapp", label: "Mi WhatsApp" },
+  { key: "correo", href: "/cuenta/correo", label: "Mi correo" },
   { key: "web", href: "/cuenta/web", label: "Mi web" },
 ] as const;
 

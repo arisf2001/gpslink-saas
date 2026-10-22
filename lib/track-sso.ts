@@ -7,7 +7,7 @@ function secret(): string {
 }
 
 // Must match routes/gpslink_sso.php on the tracking platform.
-export function trackSsoToken(gpswoxUserId: number, now = Date.now()): string {
-  const payload = Buffer.from(JSON.stringify({ uid: gpswoxUserId, exp: Math.floor(now / 1000) + 60, n: randomBytes(16).toString("hex") })).toString("base64url");
+export function trackSsoToken(gpswoxUserId: number, now = Date.now(), extra: Record<string, unknown> = {}): string {
+  const payload = Buffer.from(JSON.stringify({ ...extra, uid: gpswoxUserId, exp: Math.floor(now / 1000) + 60, n: randomBytes(16).toString("hex") })).toString("base64url");
   return `${payload}.${createHmac("sha256", secret()).update(payload).digest("base64url")}`;
 }
