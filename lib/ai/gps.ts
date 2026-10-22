@@ -162,6 +162,16 @@ export async function sendCommand(hash: string, deviceId: number, command: Engin
   return { ok: false, error: String(data?.error ?? data?.message ?? "sin respuesta") };
 }
 
+export async function sendCustom(hash: string, deviceId: number, data: string): Promise<{ ok: boolean; error?: string }> {
+  if (isMock()) {
+    mockCommands.push({ deviceId, type: data });
+    return { ok: true };
+  }
+  const res = (await userCall(hash, "send_gprs_command", { device_id: String(deviceId), type: "custom", data, message: data }, "POST")) as { status?: number; error?: string; message?: string } | null;
+  if (res?.status === 1) return { ok: true };
+  return { ok: false, error: String(res?.error ?? res?.message ?? "sin respuesta") };
+}
+
 export function streetViewUrl(lat: number, lng: number): string {
   return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`;
 }

@@ -134,6 +134,9 @@ model MockDevice {
   other        String?  @db.Text
   reportedAt   DateTime?
   imei         String?
+  lat          Float?
+  lng          Float?
+  speed        Float?
 }
 
 model ProcessedEvent {
@@ -351,6 +354,8 @@ model AlertSetting {
   lowBattery   Int      @default(20)
   offlineHours Int      @default(24)
   lastEventId  Int      @default(0)
+  zonesEnabled Boolean  @default(true)
+  zoneCut      Boolean  @default(true)
   updatedAt    DateTime @updatedAt
 }
 
@@ -362,6 +367,16 @@ model NotificationRule {
   brandWa     Boolean  @default(false)
   brandEmail  Boolean  @default(false)
   updatedAt   DateTime @updatedAt
+}
+
+// Haiti border zone of each vehicle and the state of the automatic engine stop (lib/border-zones.ts).
+model BorderZoneState {
+  deviceId  Int       @id
+  zone      String?   @db.VarChar(10)
+  cutState  String?   @db.VarChar(10)
+  cutAt     DateTime?
+  cutError  String?   @db.VarChar(255)
+  updatedAt DateTime  @updatedAt
 }
 
 model DeviceAlertState {

@@ -44,6 +44,22 @@ async function apiHash(forceRefresh = false): Promise<string> {
   return cachedHash;
 }
 
+// Sends a GPRS command (e.g. engineStop) with the admin account.
+export async function adminCommand(deviceId: number, type: string, data?: string): Promise<{ ok: boolean; error?: string }> {
+  if (isMock()) {
+    mockAdminCommands.push({ deviceId, type: data ?? type });
+    return { ok: true };
+  }
+  const res = await fetch(`${trackerUrl()}/api/send_gprs_command?lang=es&user_api_hash=${encodeURIComponent(await apiHash())}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+    body: new URLSearchParams({ device_id: String(deviceId), type, ...(data ? { data, message: data } : {}) }),
+  });
+  const json = (await res.json().catch(() => ({}))) as { status?: number; error?: string; message?: string };
+  return json.status === 1 ? { ok: true } : { ok: false, error: String(json.error ?? json.message ?? res.statusText).slice(0, 200) };
+}
+export const mockAdminCommands: { deviceId: number; type: string }[] = [];
+
 async function call(method: "GET" | "POST" | "PUT", path: string, body: Record<string, unknown>, retried = false): Promise<Record<string, unknown>> {
   const hash = await apiHash(retried);
   const query = method === "GET" ? `&${new URLSearchParams(body as Record<string, string>)}` : "";

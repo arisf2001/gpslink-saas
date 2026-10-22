@@ -62,6 +62,8 @@ export default async function AdminEquiposPage({ searchParams }: { searchParams:
           </p>
           <div className="row" style={{ alignItems: "flex-end", marginBottom: 12 }}>
             <label className="row" style={{ fontSize: 14 }}><input type="checkbox" name="enabled" defaultChecked={setting.enabled} style={{ width: "auto" }} /> Notificaciones activadas</label>
+            <label className="row" style={{ fontSize: 14 }}><input type="checkbox" name="zonesEnabled" defaultChecked={setting.zonesEnabled} style={{ width: "auto" }} /> Zonas de la frontera con Haití</label>
+            <label className="row" style={{ fontSize: 14 }}><input type="checkbox" name="zoneCut" defaultChecked={setting.zoneCut} style={{ width: "auto" }} /> Apagar el motor en zona roja (a 20 km/h o menos)</label>
             <label style={{ fontSize: 13 }}>Batería baja: menos de (%)<input name="lowBattery" defaultValue={setting.lowBattery} inputMode="numeric" style={{ width: 90 }} /></label>
             <label style={{ fontSize: 13 }}>Sin reportar: más de (horas)<input name="offlineHours" defaultValue={setting.offlineHours} inputMode="numeric" style={{ width: 90 }} /></label>
           </div>
@@ -82,7 +84,7 @@ export default async function AdminEquiposPage({ searchParams }: { searchParams:
               </tbody>
             </table>
           ))}
-          <p className="hint" style={{ marginBottom: 10 }}>Los avisos de «revisión automática» los calcula la plataforma una vez por hora y salen una sola vez cuando empieza el problema (máximo uno al día). Los demás salen cuando la alerta del cliente se dispara en su cuenta de rastreo. Las zonas roja, azul y amarilla del mapa se agregarán aquí cuando estén listas.</p>
+          <p className="hint" style={{ marginBottom: 10 }}>Los avisos de «revisión automática» los calcula la plataforma una vez por hora y salen una sola vez cuando empieza el problema (máximo uno al día). Los demás salen cuando la alerta del cliente se dispara en su cuenta de rastreo. Las zonas de la frontera (amarilla 100 km, rosada 30 km, roja 10 km) se revisan cada minuto para todos los vehículos, a cualquier hora; en la roja se apaga el motor cuando baja a 20 km/h o menos y el dueño lo enciende respondiendo ENCENDER por WhatsApp, o desde la app o la web.</p>
           <button className="btn sm dark">Guardar notificaciones</button>
         </form>
       )}

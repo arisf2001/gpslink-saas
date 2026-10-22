@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { borderEngineReply } from "./border-zones";
 import { aiSetting, confirmCommand, rateLimit, resolveUser, type AiUser } from "./ai/assistant";
 import { chat } from "./ai/engine";
 import { prisma } from "./db";
@@ -106,6 +107,12 @@ export async function handleIncoming(companyId: string, phone: string, text: str
     return connectMsg("Tu sesión venció. Conecta tu cuenta otra vez aquí:");
   }
   if ((user.company?.id ?? DIRECT_WA) !== companyId) return null;
+
+  const engine = /^(encender|apagar)[.!]*$/i.exec(message);
+  if (engine) {
+    const reply = await borderEngineReply(user, engine[1].toLowerCase());
+    if (reply) return reply;
+  }
 
   const pending = link.pendingUntil && link.pendingUntil > new Date() ? unseal(link.pendingToken) : null;
   const clearPending = () => prisma.waLink.update({ where: { id: link.id }, data: { pendingToken: null, pendingUntil: null } });

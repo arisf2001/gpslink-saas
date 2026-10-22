@@ -74,7 +74,7 @@ export async function deviceStatuses(ids: number[] | null): Promise<DeviceStatus
   });
 }
 
-async function deviceUsers(ids: number[]): Promise<{ userId: number; deviceId: number; email: string | null; groupId: number }[]> {
+export async function deviceUsers(ids: number[]): Promise<{ userId: number; deviceId: number; email: string | null; groupId: number }[]> {
   if (!ids.length) return [];
   if (isMock()) return (await prisma.mockDevice.findMany({ where: { id: { in: ids } } })).map((d) => ({ userId: d.gpswoxUserId, deviceId: d.id, email: null, groupId: 2 }));
   return withGpswoxDb(async (conn) => {
