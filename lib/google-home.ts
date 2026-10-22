@@ -2,7 +2,6 @@ import { verifyPin, type AiUser } from "./ai/assistant";
 import * as gps from "./ai/gps";
 import { prisma } from "./db";
 import { deviceStatuses, type DeviceStatus } from "./device-status";
-import { ownRecentDevices } from "./gpswox";
 import { revokeByAccess } from "./oauth";
 
 // Google Home cloud-to-cloud integration: each vehicle is a security panel (armed = engine blocked, PIN required),
@@ -13,13 +12,14 @@ export type SmartHomeRequest = { requestId: string; inputs: Input[] };
 const PANEL = "action.devices.types.SECURITYSYSTEM";
 const TRAITS = ["action.devices.traits.ArmDisarm", "action.devices.traits.OnOff", "action.devices.traits.EnergyStorage"];
 
-export function deviceFor(v: Pick<gps.Vehicle, "id" | "name" | "plate">) {
+export function deviceFor(v: Pick<gps.Vehicle, "id" | "name" | "plate" | "group">) {
   return {
     id: String(v.id),
     type: PANEL,
     traits: TRAITS,
     name: { name: v.name, ...(v.plate ? { nicknames: [v.plate] } : {}) },
     willReportState: false,
+    ...(v.group ? { roomHint: v.group } : {}),
     attributes: { queryOnlyOnOff: true, queryOnlyEnergyStorage: true, isRechargeable: false },
     deviceInfo: { manufacturer: "GPS Link", model: "GPS" },
   };
@@ -46,11 +46,8 @@ export async function smartHome(req: SmartHomeRequest, user: AiUser, accessToken
     return {};
   }
   let fleet = await gps.vehicles(user.hash);
-  // The owner's admin user sees every client's device: Google Home gets only his own vehicles that reported in the last month.
-  if ((await gps.userInfo(user.hash)).groupId === 1) {
-    const own = await ownRecentDevices(user.userId, [73]);
-    fleet = fleet.filter((v) => own.has(v.id));
-  }
+  // The owner's admin user sees every client's device: Google Home gets only the vehicles he put in a group.
+  if ((await gps.userInfo(user.hash)).groupId === 1) fleet = fleet.filter((v) => v.group);
   const mine = new Map(fleet.map((v) => [String(v.id), v]));
   if (intent === "action.devices.SYNC") {
     return { requestId: req.requestId, payload: { agentUserId: String(user.userId), devices: fleet.map(deviceFor) } };

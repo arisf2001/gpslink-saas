@@ -388,18 +388,3 @@ export async function userApiHash(userId: number): Promise<string | null> {
   });
 }
 
-// Devices only this user has (no client shares them) that reported in the last 30 days; the demo reviewer account does not count as a client.
-export async function ownRecentDevices(userId: number, ignoreUsers: number[] = []): Promise<Set<number>> {
-  if (isMock()) return new Set((await prisma.mockDevice.findMany({ where: { gpswoxUserId: userId }, select: { id: true } })).map((d) => d.id));
-  return withGpswoxDb(async (conn) => {
-    const [rows] = await conn.query<RowDataPacket[]>(
-      `SELECT p.device_id FROM user_device_pivot p
-         JOIN devices d ON d.id = p.device_id AND d.deleted = 0
-         JOIN traccar_devices t ON t.id = d.traccar_device_id
-        WHERE p.user_id = ? AND t.server_time > UTC_TIMESTAMP() - INTERVAL 30 DAY
-          AND NOT EXISTS (SELECT 1 FROM user_device_pivot q WHERE q.device_id = p.device_id AND q.user_id NOT IN (?))`,
-      [userId, [userId, ...ignoreUsers]],
-    );
-    return new Set(rows.map((r) => Number(r.device_id)));
-  });
-}

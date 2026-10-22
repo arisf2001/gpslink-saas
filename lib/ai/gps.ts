@@ -19,6 +19,7 @@ export type Vehicle = {
   timestamp: number;
   address: string | null;
   stopDuration: string | null;
+  group?: string | null;
 };
 
 export type HistorySummary = {
@@ -92,8 +93,8 @@ export async function vehicles(hash: string): Promise<Vehicle[]> {
     const now = Math.floor(Date.now() / 1000);
     return MOCK_VEHICLES.map((v) => ({ ...v, timestamp: now - 120, time: new Date((now - 120) * 1000).toLocaleString("es-DO", { timeZone: "America/Santo_Domingo" }) }));
   }
-  const groups = (await userCall(hash, "get_devices")) as { items?: RawItem[] }[] | null;
-  const items = (groups ?? []).flatMap((g) => g.items ?? []);
+  const groups = (await userCall(hash, "get_devices")) as { id?: number; title?: string; items?: RawItem[] }[] | null;
+  const items = (groups ?? []).flatMap((g) => (g.items ?? []).map((i) => ({ ...i, group: Number(g.id) > 0 && g.title?.trim() ? g.title.trim() : null })));
   return items.map((i) => ({
     id: Number(i.id),
     name: String(i.name ?? `#${i.id}`),
@@ -108,6 +109,7 @@ export async function vehicles(hash: string): Promise<Vehicle[]> {
     timestamp: Number(i.timestamp ?? 0),
     address: i.address && i.address !== "-" ? String(i.address) : null,
     stopDuration: i.stop_duration && i.stop_duration !== "0s" ? String(i.stop_duration) : null,
+    group: i.group,
   }));
 }
 
