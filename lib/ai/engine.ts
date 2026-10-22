@@ -42,7 +42,7 @@ function localNow(): string {
   return new Date().toLocaleString("sv-SE", { timeZone: "America/Santo_Domingo" }).slice(0, 16);
 }
 
-function systemPrompt(assistantName: string, companyName: string, lang: Lang, deviceId: number | null, channel: Channel): string {
+function systemPrompt(assistantName: string, companyName: string, lang: Lang, deviceId: number | null, channel: Channel, spoken = false): string {
   return [
     `You are "${assistantName}", the vehicle tracking assistant of ${companyName}. Reply in ${lang === "en" ? "English" : "Spanish (Dominican Republic, tú)"}.`,
     `Current local time (America/Santo_Domingo): ${localNow()}.`,
@@ -55,7 +55,8 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
     "Customers may refer to a vehicle by its nickname, color, make, model or type (e.g. 'la jeepeta', 'el carro rojo', 'el Toyota'): pass those words as the list_vehicles search, and mention the nickname when you answer.",
     "Street View images are from Google and are not live; the location and speed are live.",
     "Engine stop/resume: only when the customer asks, and only through request_engine_command. Never say it was executed: tell the customer to confirm with their PIN. If the vehicle is moving, warn that stopping it can be dangerous. Do not offer engine commands unprompted.",
-    channel === "whatsapp" ? "This is WhatsApp: plain text, include links as plain URLs. To confirm an engine order the customer replies here with their PIN (never say app/web)."
+    channel === "whatsapp" && spoken ? "This is a WhatsApp voice note: your reply is read aloud as audio. 1-3 short sentences, no links, no lists, no markdown, no emojis; say numbers naturally. Mention only the GPS device values that are known and only battery/signal when asked or when something is wrong. To confirm an engine order the customer replies here with their PIN (never say app/web)."
+      : channel === "whatsapp" ? "This is WhatsApp: plain text, include links as plain URLs. To confirm an engine order the customer replies here with their PIN (never say app/web)."
       : channel === "alexa" ? "This is a voice answer spoken by Alexa: 1-3 short sentences, no links, no lists, no markdown, no emojis; say numbers naturally. Mention only the GPS device values that are known (skip the unavailable ones) and only battery/signal when asked or when something is wrong. Engine stop/resume is not available by voice: if asked, only say it must be done in the app or web with the PIN; do not ask follow-up questions about it."
       : "The app/web shows buttons for map, Street View and history, so you do not need to paste links.",
     "Red zones (zona roja): when the customer asks for one, use create_red_zone (find the vehicles first with list_vehicles if they name some). For a zone around where a vehicle is now, or around coordinates, pass lat/lng (from get_vehicle) with radius_km (1 km if they do not say). Explain it alerts on entry and stops the engine when the vehicle slows to 20 km/h inside, and that it only turns on after the PIN confirmation (never say it is active before that). On voice it stays inactive: tell them to activate it in the app, web or WhatsApp.",
@@ -199,7 +200,7 @@ export async function sendLocationWhatsApp(user: AiUser, v: gps.Vehicle, lang: L
   return sentTo.length ? { status: "sent", to: `WhatsApp ending in ${sentTo.join(", ")}` } : { error: "The WhatsApp message could not be sent now (WhatsApp not connected). Tell the customer to try later." };
 }
 
-export async function chat(input: { user: AiUser; conversationId: string | null; message: string; lang: Lang; deviceId: number | null; channel: Channel }): Promise<ChatResult> {
+export async function chat(input: { user: AiUser; conversationId: string | null; message: string; lang: Lang; deviceId: number | null; channel: Channel; spoken?: boolean }): Promise<ChatResult> {
   const { user, lang, channel } = input;
   const setting = await aiSetting();
   const config = await assistantConfig(user, lang);
@@ -260,7 +261,7 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
   };
   const VOICE_BLOCKED = ["request_engine_command", "activate_red_zone"];
   if (voice) for (const name of VOICE_BLOCKED) delete tools[name];
-  const messages: Msg[] = [{ role: "system", content: systemPrompt(config.name, config.companyName, lang, input.deviceId, channel) }, ...past, { role: "user", content: input.message }];
+  const messages: Msg[] = [{ role: "system", content: systemPrompt(config.name, config.companyName, lang, input.deviceId, channel, input.spoken) }, ...past, { role: "user", content: input.message }];
   // Remote channels (WhatsApp, Alexa) think with Gemini when configured; in-platform chat stays on OpenAI.
   let provider: Provider = (channel === "whatsapp" || channel === "alexa") && process.env.GEMINI_API_KEY ? "gemini" : "openai";
   let reply = "";

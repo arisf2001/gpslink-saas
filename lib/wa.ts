@@ -105,7 +105,7 @@ async function linkFromProfile(phone: string): Promise<boolean> {
   return true;
 }
 
-export async function handleIncoming(companyId: string, phone: string, text: string): Promise<string | null> {
+export async function handleIncoming(companyId: string, phone: string, text: string, opts: { voice?: boolean } = {}): Promise<string | null> {
   const owner = companyId === OWNER_WA;
   const direct = companyId === DIRECT_WA || owner;
   const company = direct ? null : await prisma.company.findUnique({ where: { id: companyId } });
@@ -114,7 +114,7 @@ export async function handleIncoming(companyId: string, phone: string, text: str
   if (owner && !(await linkFromProfile(phone))) return null;
   const brand = company?.name ?? "GPS Link";
   const message = text.trim().slice(0, 1000);
-  if (!message) return "Por ahora solo entiendo mensajes de texto.";
+  if (!message) return opts.voice ? "No pude entender la nota de voz. Intenta otra vez o escríbeme." : "Por ahora solo entiendo mensajes de texto y notas de voz.";
   if (rateLimit(`wa:${companyId}:${phone}`, 10) > 0) return null;
   const connectMsg = (intro: string) => `${intro}\n${baseUrl()}/wa/vincular?t=${linkToken(companyId, phone)}\n(El enlace vence en ${LINK_MINUTES} minutos.)`;
   const link = await prisma.waLink.findUnique({ where: { companyId_phone: { companyId, phone } } });
@@ -147,13 +147,13 @@ export async function handleIncoming(companyId: string, phone: string, text: str
     return "Listo, cancelé la orden. No se envió nada al vehículo.";
   }
 
-  const result = await chat({ user, conversationId: link.conversationId, message, lang: "es", deviceId: null, channel: "whatsapp" });
+  const result = await chat({ user, conversationId: link.conversationId, message, lang: "es", deviceId: null, channel: "whatsapp", spoken: opts.voice });
   await prisma.waLink.update({
     where: { id: link.id },
     data: { conversationId: result.conversation_id, pendingToken: result.confirm ? seal(result.confirm.token) : null, pendingUntil: result.confirm ? new Date(Date.now() + CONFIRM_MS) : null },
   });
   let reply = result.reply;
-  for (const a of result.actions) if ("url" in a && a.url && !reply.includes(a.url)) reply += `\n${a.label}: ${a.url}`;
+  if (!opts.voice) for (const a of result.actions) if ("url" in a && a.url && !reply.includes(a.url)) reply += `\n${a.label}: ${a.url}`;
   if (result.confirm) reply += "\n\nPara confirmar responde con tu PIN (tienes 2 minutos) o escribe CANCELAR.";
   return reply;
 }

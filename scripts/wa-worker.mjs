@@ -5,7 +5,7 @@ import { createHmac } from "crypto";
 import path from "path";
 import pino from "pino";
 import { PrismaClient } from "@prisma/client";
-import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion, useMultiFileAuthState as loadAuthState } from "@whiskeysockets/baileys";
+import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, useMultiFileAuthState as loadAuthState } from "@whiskeysockets/baileys";
 
 for (const f of [".env.production.local", ".env.local", ".env"]) {
   try { process.loadEnvFile(f); } catch {}
@@ -40,9 +40,15 @@ async function handle(entry, m) {
   const phone = digitsOf(jid.endsWith("@lid") ? m.key.senderPn : jid);
   if (!phone) return;
   await sock.readMessages([m.key]).catch(() => {});
-  await sock.sendPresenceUpdate("composing", jid).catch(() => {});
-  const res = await ask({ companyId, phone, text }).catch((e) => { console.error("gpslink-wa: app", e?.message); return {}; });
-  if (res.reply) {
+  const note = x.audioMessage && Number(x.audioMessage.seconds || 0) <= 180 ? x.audioMessage : null;
+  if (!text && !note) return;
+  const audio = note ? await downloadMediaMessage(m, "buffer", {}, { logger, reuploadRequest: sock.updateMediaMessage }).catch(() => null) : null;
+  await sock.sendPresenceUpdate(note ? "recording" : "composing", jid).catch(() => {});
+  const res = await ask({ companyId, phone, text, ...(audio ? { audio: audio.toString("base64"), mime: note.mimetype } : {}) }).catch((e) => { console.error("gpslink-wa: app", e?.message); return {}; });
+  if (res.audio) {
+    const r = await sock.sendMessage(jid, { audio: Buffer.from(res.audio, "base64"), mimetype: "audio/ogg; codecs=opus", ptt: true });
+    if (r?.key?.id) entry.sentByBot.add(r.key.id);
+  } else if (res.reply) {
     await sleep(1500 + Math.min(res.reply.length * 15, 4000));
     const r = await sock.sendMessage(jid, { text: res.reply });
     if (r?.key?.id) entry.sentByBot.add(r.key.id);
