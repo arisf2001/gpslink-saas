@@ -24,3 +24,11 @@ test("red zone messages explain the engine stop", () => {
   assert.match(redZoneMessage("cut", { name: "Allentown" }, p, { state: "sent" }).subject, /Motor apagado/);
   assert.match(redZoneMessage("exit", { name: "Allentown" }, p, { state: null }).subject, /salió/);
 });
+
+test("parseCoords reads 'lat, lng' only", async () => {
+  const { parseCoords } = await import("../lib/red-zones");
+  assert.deepEqual(parseCoords("40.608884, -75.331126"), { lat: 40.608884, lng: -75.331126 });
+  assert.equal(parseCoords("Allentown, Pensilvania"), null);
+  assert.equal(parseCoords("0, 0"), null);
+  assert.equal(parseCoords("95, 10"), null);
+});

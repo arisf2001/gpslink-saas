@@ -35,7 +35,21 @@ export function zoneShape(z: Pick<RedZone, "radiusM">, lang: "es" | "en"): strin
   return lang === "en" ? `${km} km around the place` : `${km} km alrededor del lugar`;
 }
 
-export async function createRedZone(userId: number, input: { place: string; radiusKm?: number | null; deviceIds: number[]; name?: string | null }, lang: "es" | "en"): Promise<RedZone | { error: string }> {
+export function parseCoords(text: string): { lat: number; lng: number } | null {
+  const m = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(text);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0) ? { lat, lng } : null;
+}
+
+export async function createRedZone(userId: number, input: { place: string; point?: { lat: number; lng: number } | null; radiusKm?: number | null; deviceIds: number[]; name?: string | null }, lang: "es" | "en"): Promise<RedZone | { error: string }> {
+  const point = input.point ?? parseCoords(input.place);
+  if (point) {
+    const radiusKm = Math.min(Math.max(input.radiusKm && input.radiusKm > 0 ? input.radiusKm : 1, 0.1), MAX_ZONE_KM);
+    const name = (input.name?.trim() || input.place.trim() || `${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}`).slice(0, 120);
+    return prisma.redZone.create({ data: { gpswoxUserId: userId, name, lat: point.lat, lng: point.lng, radiusM: Math.round(radiusKm * 1000), deviceIds: JSON.stringify([...new Set(input.deviceIds)].slice(0, 500)) } });
+  }
   const found = await findPlace(input.place, lang);
   if (!found) return { error: "Place not found; ask the customer for the place with its city and state or country" };
   const [s, n, w, e] = found.bbox;
