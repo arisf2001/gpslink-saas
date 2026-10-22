@@ -5,13 +5,15 @@ import { getSession } from "@/lib/session";
 import { SiteNav } from "../site-nav";
 import { iaLogoutAction } from "./actions";
 import { AssistantChat } from "./chat";
+import { GoogleHomeGroups } from "./google-home-groups";
 import { IaLogin } from "./login";
 import { VoiceConnect } from "./voice-connect";
 
 export const metadata: Metadata = { title: "Asistente IA | GPS Link" };
 
-export default async function AsistentePage({ searchParams }: { searchParams: Promise<{ embed?: string }> }) {
-  const embed = (await searchParams).embed === "1";
+export default async function AsistentePage({ searchParams }: { searchParams: Promise<{ embed?: string; gh?: string }> }) {
+  const sp = await searchParams;
+  const embed = sp.embed === "1";
   const hash = await getSession("ia");
   const loggedIn = !!hash;
   const company = hash ? await resolveUser(hash).then((u) => u.company).catch(() => null) : null;
@@ -24,6 +26,7 @@ export default async function AsistentePage({ searchParams }: { searchParams: Pr
             <AssistantChat />
             {/* Gemini personal accounts cannot add custom apps yet (checked 2026-10-22); set GEMINI_CONNECT=1 when Google opens it. */}
             <VoiceConnect geminiUrl={process.env.GEMINI_CONNECT === "1" ? resourceUrl(company?.subdomain ?? null) : null} alexaUrl={process.env.ALEXA_SKILL_URL || null} color={company?.brandColor || "#0F4C5C"} />
+            <GoogleHomeGroups hash={hash} embed={embed} saved={sp.gh === "ok"} />
             <form action={iaLogoutAction} style={{ textAlign: "center", margin: "8px 0" }}>
               <input type="hidden" name="embed" value={embed ? "1" : ""} />
               <button className="linkbtn">Salir del asistente</button>

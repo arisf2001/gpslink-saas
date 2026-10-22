@@ -673,3 +673,9 @@ model RedZoneState {
 
   @@id([zoneId, deviceId])
 }
+
+model GoogleHomeGroups {
+  gpswoxUserId Int      @id
+  groups       String   @db.Text
+  updatedAt    DateTime @updatedAt
+}
