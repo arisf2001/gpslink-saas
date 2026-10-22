@@ -4,9 +4,10 @@ import type { SimCard, SimRenewal } from "@prisma/client";
 import { prisma } from "../db";
 import { BRAND, appUrl } from "../config";
 import { formatDate, formatMoney } from "../format";
-import { emailHtml, sendEmail, sendWhatsApp, type ChannelResult } from "../notify";
+import { emailHtml, sendEmail, type ChannelResult } from "../notify";
 import { daysLeft, DAY, statusLabel } from "./carriers";
 import { syncSims } from "./sync";
+import { notify } from "../notifications";
 
 export const NOTICE_DAYS = 10;
 export const REACTIVATION_NOTE = "Renueve con tiempo: la reactivación puede tardar hasta 5 días laborables.";
@@ -52,15 +53,10 @@ async function noticeOnce(iccid: string, kind: string, dedupeKey: string, send: 
   return true;
 }
 
-// Agency SIMs are billed to the white-label company; direct SIMs to the vehicle owner.
+// Agency SIMs are billed to the white-label company; direct SIMs to the vehicle owner. Channels follow the "sim_renewal" rule.
 async function toClient(card: SimCard, subject: string, title: string, lines: string[], cta?: { label: string; url: string }): Promise<ChannelResult[]> {
-  const company = card.companyId ? await prisma.company.findUnique({ where: { id: card.companyId } }) : null;
-  if (card.companyId) card = { ...card, ownerEmail: company?.email ?? null, ownerPhone: company?.phone ?? null };
-  const text = [`*${title}*`, ...lines, cta?.url ?? ""].filter(Boolean).join("\n");
-  return Promise.all([
-    card.ownerEmail ? sendEmail(card.ownerEmail, subject, emailHtml(title, lines, cta)) : Promise.resolve<ChannelResult>({ channel: "email", ok: false, error: "sin correo" }),
-    card.ownerPhone ? sendWhatsApp(card.ownerPhone, text) : Promise.resolve<ChannelResult>({ channel: "whatsapp", ok: false, error: "sin WhatsApp" }),
-  ]);
+  const aud = card.companyId ? { companyId: card.companyId } : { email: card.ownerEmail, phone: card.ownerPhone };
+  return notify("sim_renewal", aud, { subject, title, lines, cta });
 }
 
 const vehicle = (c: SimCard) => (c.deviceName ? `del vehículo ${c.deviceName}` : `terminada en ${c.iccid.slice(-6)}`);

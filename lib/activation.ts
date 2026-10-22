@@ -5,6 +5,7 @@ import { prisma } from "./db";
 import { formatDate, formatMoney } from "./format";
 import { addDeviceUser, brandChain, createAdminDevice, deviceIdByImei, lastSignals, setDeviceExpiration } from "./gpswox";
 import { emailHtml, sendEmail } from "./notify";
+import { notify } from "./notifications";
 import { getStripe } from "./stripe";
 
 export const STABLE_HOURS = 5;
@@ -98,9 +99,11 @@ export async function applyActivationCheckout(session: Stripe.Checkout.Session):
     act = await prisma.deviceActivation.update({ where: { id }, data: { error: String((e as Error).message).slice(0, 2000) } });
     await sendEmail(BRAND.supportEmail, `Activación: no se pudo crear el equipo ${act.imei}`, emailHtml("Revisar activación", [`Cliente ${act.email}, IMEI ${act.imei}.`, act.error ?? ""], { label: "Abrir activaciones", url: `${appUrl()}/admin/activacion` }));
   }
-  await sendEmail(act.email, `Cómo conectar tu equipo ${act.name}`, emailHtml(`Activa tu ${MODELS[act.model as ModelKey]?.label ?? "equipo"}`, [`Equipo: ${act.name} · IMEI ${act.imei}.`, ...instructionLines(act.model as ModelKey)]));
+  await notify("activation_instructions", audience(act), { subject: `Cómo conectar tu equipo ${act.name}`, title: `Activa tu ${MODELS[act.model as ModelKey]?.label ?? "equipo"}`, lines: [`Equipo: ${act.name} · IMEI ${act.imei}.`, ...instructionLines(act.model as ModelKey)] });
   return act;
 }
+
+const audience = (act: DeviceActivation) => ({ gpswoxUserId: act.gpswoxUserId, email: act.email, companyId: act.companyId });
 
 const addYear = (d: Date) => { const x = new Date(d); x.setFullYear(x.getFullYear() + 1); return x; };
 
@@ -127,14 +130,14 @@ async function activate(act: DeviceActivation): Promise<void> {
   } catch (e) {
     const error = String((e as Error).message).slice(0, 2000);
     await prisma.deviceActivation.update({ where: { id: act.id }, data: { status: "FAILED", error } });
-    await sendEmail(act.email, `No pudimos cobrar la activación de ${act.name}`, emailHtml("Pago rechazado", [`Tu equipo ${act.name} ya está conectado, pero la tarjeta fue rechazada.`, "Entra de nuevo y activa el equipo con otra tarjeta."], { label: "Activa tu dispositivo ahora", url: `${appUrl()}/activar` }));
+    await notify("payment_failed", audience(act), { subject: `No pudimos cobrar la activación de ${act.name}`, title: "Pago rechazado", lines: [`Tu equipo ${act.name} ya está conectado, pero la tarjeta fue rechazada.`, "Entra de nuevo y activa el equipo con otra tarjeta."], cta: { label: "Activa tu dispositivo ahora", url: `${appUrl()}/activar` } });
     return;
   }
   const expiresAt = addYear(new Date());
   await addDeviceUser(act.deviceId!, act.gpswoxUserId);
   await setDeviceExpiration(act.deviceId!, expiresAt);
   await prisma.deviceActivation.update({ where: { id: act.id }, data: { status: "ACTIVE", subscriptionId, activatedAt: new Date(), expiresAt, error: null } });
-  await sendEmail(act.email, `Tu equipo ${act.name} ya está activo`, emailHtml("Equipo activo", [`${act.name} ya aparece en tu cuenta de rastreo.`, act.amountCents > 0 ? `Se cobraron ${formatMoney(act.amountCents)} por 12 meses. Se renueva solo el ${formatDate(expiresAt)}.` : `Activo hasta el ${formatDate(expiresAt)}.`]));
+  await notify("activation_active", audience(act), { subject: `Tu equipo ${act.name} ya está activo`, title: "Equipo activo", lines: [`${act.name} ya aparece en tu cuenta de rastreo.`, act.amountCents > 0 ? `Se cobraron ${formatMoney(act.amountCents)} por 12 meses. Se renueva solo el ${formatDate(expiresAt)}.` : `Activo hasta el ${formatDate(expiresAt)}.`] });
   const sim = await prisma.simCard.findFirst({ where: { imei: act.imei, goneAt: null } });
   if (sim) {
     await prisma.deviceActivation.update({ where: { id: act.id }, data: { simIccid: sim.iccid } });
@@ -186,6 +189,6 @@ export async function applyActivationInvoice(inv: Stripe.Invoice, paid: boolean)
   } else {
     await setDeviceExpiration(act.deviceId, new Date());
     await prisma.deviceActivation.update({ where: { id: act.id }, data: { status: "PAST_DUE" } });
-    await sendEmail(act.email, `No pudimos renovar ${act.name}`, emailHtml("Renovación rechazada", [`La renovación anual de ${act.name} fue rechazada y el equipo quedó vencido.`, "Actualiza tu tarjeta para reactivarlo."]));
+    await notify("payment_failed", audience(act), { subject: `No pudimos renovar ${act.name}`, title: "Renovación rechazada", lines: [`La renovación anual de ${act.name} fue rechazada y el equipo quedó vencido.`, "Actualiza tu tarjeta para reactivarlo."] });
   }
 }

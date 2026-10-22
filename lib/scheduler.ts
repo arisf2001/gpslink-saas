@@ -2,6 +2,7 @@ import { runDailyLifecycle } from "./companies";
 import { runDeviceAlerts } from "./device-status";
 import { runSims } from "./sim/notify";
 import { runActivations } from "./activation";
+import { runEventNotifications } from "./notifications";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -22,6 +23,12 @@ export function startLifecycleScheduler() {
     runActivations()
       .then((s) => (s.signaled || s.activated) && console.log("[activacion]", JSON.stringify(s)))
       .catch((e) => console.error("[activacion] failed:", e));
+  const events = () =>
+    runEventNotifications()
+      .then((s) => s.sent && console.log("[eventos]", JSON.stringify(s)))
+      .catch((e) => console.error("[eventos] failed:", e));
+  setTimeout(events, 110_000);
+  setInterval(events, 2 * 60_000);
   setTimeout(activations, 100_000);
   setInterval(activations, 15 * 60_000);
   setTimeout(run, 60_000);

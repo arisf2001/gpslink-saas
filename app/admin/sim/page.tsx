@@ -8,7 +8,7 @@ import { countryEs, daysLeft, ensureCarriers, SIM_STATUS, statusLabel } from "@/
 import { dailyReportData, NOTICE_DAYS, REACTIVATION_NOTE } from "@/lib/sim/notify";
 import { telebayConfigured } from "@/lib/sim/telebay";
 import { AdminShell } from "../admin-shell";
-import { linkSimAction, markDoneAction, saveCarrierAction, saveSupplierAction, syncNowAction } from "./actions";
+import { linkSimAction, markDoneAction, saveSupplierAction, syncNowAction } from "./actions";
 import { SimCommand } from "./sim-ui";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,6 @@ const TABS = [
   ["vencer", "Por vencer"],
   ["pagadas", "Pagadas por reactivar"],
   ["sin-equipo", "Sin equipo"],
-  ["precios", "Precios"],
 ] as const;
 
 const EXPIRY = [
@@ -119,6 +118,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
   if (!(await getSession("admin"))) redirect("/admin");
   const sp = await searchParams;
   const { f = "hoy", ok, error, q = "" } = sp;
+  if (f === "precios") redirect("/admin/planes#sim");
   const now = new Date();
   const carriers = await ensureCarriers();
   const all = await prisma.simCard.findMany({ where: { goneAt: null }, orderBy: [{ expiresAt: "asc" }, { iccid: "asc" }] });
@@ -252,33 +252,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
         </div>
       )}
 
-      {f === "precios" && (
-        <div className="panel">
-          <p className="hint" style={{ marginBottom: 10 }}>Precios por año. <b>Público:</b> tus clientes directos de track.gpslinkusa.com. <b>Agencia:</b> lo que paga la marca blanca por las SIM de sus equipos. La reactivación se suma cuando la SIM ya venció o está suspendida. La compañía se reconoce por el comienzo del ICCID.</p>
-          <table className="t">
-            <thead><tr><th>Compañía</th><th>Precios en USD</th></tr></thead>
-            <tbody>
-              {carriers.map((c) => (
-                <tr key={c.code}>
-                  <td><b>{c.name}</b><div className="hint">{all.filter((s) => s.carrierCode === c.code).length} SIM</div></td>
-                  <td>
-                    <form action={saveCarrierAction} className="row" style={{ alignItems: "flex-end" }}>
-                      <input type="hidden" name="code" value={c.code} />
-                      <label style={{ fontSize: 13 }}>Comienzo del ICCID<input name="prefixes" defaultValue={c.iccidPrefixes} style={{ width: 120 }} /></label>
-                      <label style={{ fontSize: 13 }}>Público: renovación/año<input name="renew" defaultValue={(c.renewCents / 100).toString()} inputMode="decimal" style={{ width: 120 }} /></label>
-                      <label style={{ fontSize: 13 }}>Público: reactivación<input name="reactivate" defaultValue={(c.reactivateCents / 100).toString()} inputMode="decimal" style={{ width: 120 }} /></label>
-                      <label style={{ fontSize: 13 }}>Agencia: renovación/año<input name="agencyRenew" defaultValue={(c.agencyRenewCents / 100).toString()} inputMode="decimal" style={{ width: 120 }} /></label>
-                      <label style={{ fontSize: 13 }}>Agencia: reactivación<input name="agencyReactivate" defaultValue={(c.agencyReactivateCents / 100).toString()} inputMode="decimal" style={{ width: 120 }} /></label>
-                      <button className="btn sm">{ok === "precios" ? "Guardado ✓" : "Guardar"}</button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="hint" style={{ marginTop: 8 }}>Si el precio de renovación está en 0, no se envían avisos de pago (ni al público ni a las agencias).</p>
-        </div>
-      )}
+      <p className="hint" style={{ marginTop: 12 }}>Los precios de las SIM (público y agencia) están en <a href="/admin/planes#sim">Precios</a>.</p>
       <div className="panel" id="suplidor" style={{ marginTop: 18 }}>
         <h2 style={{ fontSize: 17, marginBottom: 6, textAlign: "left" }}>Contacto del suplidor</h2>
         <p className="hint" style={{ marginBottom: 10 }}>Solo lo ves tú. Llénalo con los datos de cada compañía de SIM.</p>

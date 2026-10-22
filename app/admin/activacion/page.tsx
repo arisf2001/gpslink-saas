@@ -5,16 +5,15 @@ import { prisma } from "@/lib/db";
 import { formatDate, formatMoney } from "@/lib/format";
 import { getSession } from "@/lib/session";
 import { AdminShell } from "../admin-shell";
-import { saveOfferAction, toggleBrandAction } from "./actions";
+import { saveTrackAction, toggleBrandAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
-const money = (c: number) => (c ? (c / 100).toFixed(2) : "");
 const when = (d: Date | null) => (d ? d.toLocaleString("es-DO", { dateStyle: "short", timeStyle: "short" }) : "—");
 
-export default async function ActivacionPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+export default async function ActivacionPage({ searchParams }: { searchParams: Promise<{ ok?: string }> }) {
   if (!(await getSession("admin"))) redirect("/admin");
-  const { ok, error } = await searchParams;
+  const { ok } = await searchParams;
   const s = await activationSetting();
   const [companies, acts] = await Promise.all([
     prisma.company.findMany({ where: { gpswoxUserId: { not: null } }, orderBy: { name: "asc" }, select: { id: true, name: true, subdomain: true, activationEnabled: true } }),
@@ -27,22 +26,16 @@ export default async function ActivacionPage({ searchParams }: { searchParams: P
       <p className="hint">
         El cliente pulsa «Activa tu dispositivo ahora», escoge GT06 o SinoTrack, pone el IMEI y su tarjeta. Le llegan las instrucciones por correo. Cuando el equipo lleva {STABLE_HOURS} horas conectado se cobra por 12 meses y el equipo le aparece en su cuenta. Se renueva solo cada año.
       </p>
-      {error === "precio" && <div className="err" style={{ margin: "10px 0" }}>Precio no válido.</div>}
-      {error === "nada" && <div className="err" style={{ margin: "10px 0" }}>Escoge al menos una cosa para cobrar (plataforma o SIM).</div>}
-      {ok && <div className="ok" style={{ margin: "10px 0" }}>{ok === "marca" ? "Marca blanca actualizada." : "Oferta guardada."}</div>}
+      {ok && <div className="ok" style={{ margin: "10px 0" }}>{ok === "marca" ? "Marca blanca actualizada." : "Guardado."}</div>}
 
       <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", marginTop: 12 }}>
-        <form action={saveOfferAction} className="panel" style={{ display: "grid", gap: 10 }}>
-          <h2 style={{ fontSize: 17, margin: 0 }}>Oferta (por equipo, 12 meses)</h2>
+        <form action={saveTrackAction} className="panel" style={{ display: "grid", gap: 10 }}>
+          <h2 style={{ fontSize: 17, margin: 0 }}>Mis clientes directos</h2>
           <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" name="trackEnabled" defaultChecked={s.trackEnabled} style={{ width: "auto" }} /> Activo para mis clientes de track.gpslinkusa.com</label>
-          <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" name="chargePlatform" defaultChecked={s.chargePlatform} style={{ width: "auto" }} /> Cobrar plataforma</label>
-          <label style={{ fontSize: 13, display: "grid", gap: 4 }}>Precio plataforma / año (USD)<input name="platform" defaultValue={money(s.platformCents)} inputMode="decimal" placeholder="0.00" /></label>
-          <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" name="chargeSim" defaultChecked={s.chargeSim} style={{ width: "auto" }} /> Cobrar SIM</label>
-          <label style={{ fontSize: 13, display: "grid", gap: 4 }}>Precio SIM / año (USD)<input name="sim" defaultValue={money(s.simCents)} inputMode="decimal" placeholder="0.00" /></label>
           <p className="hint" style={{ margin: 0 }}>
-            Hoy el cliente paga <b>{formatMoney(total, s.currency)}</b> por equipo al año{offerItems(s).length ? ` (${offerItems(s).map((i) => `${i.label} ${formatMoney(i.cents, s.currency)}`).join(" + ")})` : ""}. Ejemplo: marca solo «Cobrar SIM» y la plataforma queda gratis. Con total $0 el equipo se activa sin cobro, pero igual se pide la tarjeta.
+            Hoy el cliente paga <b>{formatMoney(total, s.currency)}</b> por equipo al año{offerItems(s).length ? ` (${offerItems(s).map((i) => `${i.label} ${formatMoney(i.cents, s.currency)}`).join(" + ")})` : ""}. Los precios se cambian en <a href="/admin/planes#activacion">Precios</a>.
           </p>
-          <div><button className="btn sm dark">Guardar oferta</button></div>
+          <div><button className="btn sm dark">Guardar</button></div>
         </form>
 
         <div className="panel">

@@ -17,6 +17,8 @@ async function main() {
   await prisma.waSession.create({ data: { companyId: company.id, want: true, status: "CONNECTED" } });
   await prisma.waLink.create({ data: { companyId: company.id, phone: "18095550102", gpswoxUserId: client.id, hashSealed: seal(`mock:${client.email}`) } });
   const prevSetting = await prisma.alertSetting.findUnique({ where: { id: 1 } });
+  const prevRule = await prisma.notificationRule.findUnique({ where: { kind: "offline" } });
+  await prisma.notificationRule.deleteMany({ where: { kind: { in: ["low_battery", "power_cut", "offline"] } } });
   await prisma.alertSetting.upsert({ where: { id: 1 }, create: { id: 1, enabled: true }, update: { enabled: true, lowBattery: 20, offlineHours: 24 } });
   const outbox = () => prisma.waOutbox.findMany({ where: { companyId: company.id }, orderBy: { id: "asc" } });
   try {
@@ -35,22 +37,26 @@ async function main() {
     assert.equal(msgs.filter((m) => m.phone === "18095550102").length, 2, "cliente: batería + corriente");
     assert.equal(msgs.filter((m) => m.phone === "18095550199").length, 2, "marca blanca: batería + corriente");
     assert.ok(msgs.some((m) => /batería baja \(15 %\)/.test(m.text)) && msgs.some((m) => /desconectó de la corriente/.test(m.text)));
-    assert.ok(msgs.every((m) => m.text.startsWith("Aviso de Rastreo Alertas")));
+    assert.ok(msgs.every((m) => m.text.includes("Aviso de Rastreo Alertas")));
     console.log("Batería baja y sin corriente -> cliente y marca blanca OK");
 
     await runDeviceAlerts();
     assert.equal((await outbox()).length, 4, "no se repite");
     console.log("Sin repetir OK");
 
+    await prisma.notificationRule.create({ data: { kind: "offline", clientWa: true, brandWa: false } });
     await prisma.mockDevice.update({ where: { id: dev.id }, data: { reportedAt: new Date(Date.now() - 25 * H) } });
     await runDeviceAlerts();
     const off = (await outbox()).slice(4);
-    assert.equal(off.length, 2); assert.match(off[0].text, /más de 24 horas sin reportar/);
+    assert.equal(off.length, 1, "sin reportar: solo al cliente (marca blanca desmarcada)");
+    assert.equal(off[0].phone, "18095550102"); assert.match(off[0].text, /más de 24 horas sin reportar/);
     console.log("Sin reportar 24 h OK:", off[0].text);
 
     assert.equal(await prisma.deviceAlert.count({ where: { deviceId: dev.id } }), 3);
     console.log("Historial de avisos OK");
   } finally {
+    await prisma.notificationRule.deleteMany({ where: { kind: "offline" } });
+    if (prevRule) await prisma.notificationRule.create({ data: prevRule });
     await prisma.deviceAlert.deleteMany({ where: { deviceId: dev.id } });
     await prisma.deviceAlertState.deleteMany({ where: { deviceId: dev.id } });
     await prisma.waOutbox.deleteMany({ where: { companyId: company.id } });

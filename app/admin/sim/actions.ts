@@ -22,10 +22,10 @@ export async function saveCarrierAction(formData: FormData) {
   const agencyRenew = parseMoneyToCents(String(formData.get("agencyRenew") ?? ""));
   const agencyReact = parseMoneyToCents(String(formData.get("agencyReactivate") ?? ""));
   const prefixes = String(formData.get("prefixes") ?? "").split(",").map((p) => p.replace(/\D/g, "")).filter(Boolean).join(",");
-  if (renew === null || react === null || agencyRenew === null || agencyReact === null || !prefixes) redirect("/admin/sim?f=precios&error=precio");
+  if (renew === null || react === null || agencyRenew === null || agencyReact === null || !prefixes) redirect("/admin/planes?error=sim#sim");
   await prisma.simCarrier.update({ where: { code }, data: { renewCents: renew, reactivateCents: react, agencyRenewCents: agencyRenew, agencyReactivateCents: agencyReact, iccidPrefixes: prefixes } });
   revalidatePath("/admin/sim");
-  redirect("/admin/sim?f=precios&ok=precios");
+  redirect("/admin/planes?ok=sim#sim");
 }
 
 export async function syncNowAction() {

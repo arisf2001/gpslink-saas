@@ -350,7 +350,18 @@ model AlertSetting {
   ownerPhone   String?  @db.VarChar(30)
   lowBattery   Int      @default(20)
   offlineHours Int      @default(24)
+  lastEventId  Int      @default(0)
   updatedAt    DateTime @updatedAt
+}
+
+// Who receives each notification and by which channel (see lib/notifications.ts for the catalog and defaults).
+model NotificationRule {
+  kind        String   @id @db.VarChar(40)
+  clientWa    Boolean  @default(false)
+  clientEmail Boolean  @default(false)
+  brandWa     Boolean  @default(false)
+  brandEmail  Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
 }
 
 model DeviceAlertState {

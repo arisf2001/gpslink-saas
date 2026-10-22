@@ -1,8 +1,7 @@
 import type { RowDataPacket } from "mysql2/promise";
 import { prisma } from "./db";
+import { notificationRules, notify } from "./notifications";
 import { isMock, withGpswoxDb } from "./gpswox";
-import { sendWhatsApp } from "./notify";
-import { DIRECT_WA, queueWa } from "./wa";
 
 // Battery, GSM signal, satellites, power and relay state that each GPS sends to GPS Link (traccar_devices.other).
 // Read-only access to the GPSWOX database.
@@ -75,12 +74,12 @@ export async function deviceStatuses(ids: number[] | null): Promise<DeviceStatus
   });
 }
 
-async function deviceUsers(ids: number[]): Promise<{ userId: number; deviceId: number }[]> {
+async function deviceUsers(ids: number[]): Promise<{ userId: number; deviceId: number; email: string | null; groupId: number }[]> {
   if (!ids.length) return [];
-  if (isMock()) return (await prisma.mockDevice.findMany({ where: { id: { in: ids } } })).map((d) => ({ userId: d.gpswoxUserId, deviceId: d.id }));
+  if (isMock()) return (await prisma.mockDevice.findMany({ where: { id: { in: ids } } })).map((d) => ({ userId: d.gpswoxUserId, deviceId: d.id, email: null, groupId: 2 }));
   return withGpswoxDb(async (conn) => {
-    const [rows] = await conn.query<RowDataPacket[]>("SELECT user_id, device_id FROM user_device_pivot WHERE device_id IN (?)", [ids]);
-    return rows.map((r) => ({ userId: Number(r.user_id), deviceId: Number(r.device_id) }));
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT p.user_id, p.device_id, u.email, u.group_id FROM user_device_pivot p JOIN users u ON u.id = p.user_id WHERE p.device_id IN (?)", [ids]);
+    return rows.map((r) => ({ userId: Number(r.user_id), deviceId: Number(r.device_id), email: r.email ? String(r.email) : null, groupId: Number(r.group_id) }));
   });
 }
 
@@ -101,6 +100,7 @@ export function problems(s: DeviceStatus, now: Date, cfg: AlertConfig): string[]
 }
 
 export type AlertKind = "low_battery" | "power_cut" | "offline";
+const ALERT_LABEL: Record<AlertKind, string> = { low_battery: "Batería baja", power_cut: "Desconectado de la corriente", offline: "Sin reportar" };
 export type AlertState = { low: boolean; offline: boolean; charging: boolean | null; sent: Partial<Record<AlertKind, number>> };
 
 const DAY_MS = 86_400_000;
@@ -152,26 +152,20 @@ export async function runDeviceAlerts(now = new Date()): Promise<{ checked: numb
   const ids = [...new Set(fired.map((f) => f.s.deviceId))];
   const users = await deviceUsers(ids);
   const billed = await prisma.billedDevice.findMany({ where: { deviceId: { in: ids }, removedAt: null }, include: { company: true } });
-  const links = await prisma.waLink.findMany({ where: { gpswoxUserId: { in: [...new Set(users.map((u) => u.userId))] } } });
+  const rules = await notificationRules();
 
   for (const { s, kind } of fired) {
     summary.fired++;
     const company = billed.find((b) => b.deviceId === s.deviceId)?.company ?? null;
     const active = company && company.status !== "CANCELED" ? company : null;
-    const text = alertText(kind, s, active?.name ?? "GPS Link", cfg);
+    const msg = { subject: `${ALERT_LABEL[kind]}: ${s.name}`, title: ALERT_LABEL[kind], lines: [alertText(kind, s, active?.name ?? "GPS Link", cfg)] };
     const done = new Set<string>();
-    const deliver = async (key: string, send: () => Promise<boolean>) => {
-      if (done.has(key)) return;
-      done.add(key);
-      if (await send().catch(() => false)) summary.sent++;
-    };
-    const owners = new Set(users.filter((u) => u.deviceId === s.deviceId).map((u) => u.userId));
-    for (const l of links.filter((l) => owners.has(l.gpswoxUserId))) {
-      if (l.companyId === DIRECT_WA) await deliver(l.phone, async () => (await sendWhatsApp(l.phone, text)).ok);
-      else if (l.companyId === active?.id || !active) await deliver(l.phone, () => queueWa(l.companyId, l.phone, text));
+    // Admin accounts (group 1) see every device; the notice is for the vehicle owner and the brand.
+    const owners = users.filter((u) => u.deviceId === s.deviceId && u.groupId !== 1);
+    for (const o of owners.length ? owners : [{ userId: null, email: null }]) {
+      const res = await notify(kind, { gpswoxUserId: o.userId, email: o.email, companyId: active?.id ?? null }, msg, { rules, done });
+      summary.sent += res.filter((r) => r.ok).length;
     }
-    if (active?.phone) await deliver(`co:${active.phone}`, async () => (await queueWa(active.id, active.phone, text)) || (await sendWhatsApp(active.phone, text)).ok);
-    if (setting.ownerPhone) await deliver(`owner:${setting.ownerPhone}`, async () => (await sendWhatsApp(setting.ownerPhone!, `${text} (${active?.name ?? "GPS Link directo"})`)).ok);
     await prisma.deviceAlert.create({ data: { deviceId: s.deviceId, deviceName: s.name, companyId: active?.id ?? null, kind, sentTo: done.size } });
   }
   return summary;
