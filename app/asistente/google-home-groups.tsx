@@ -3,7 +3,7 @@ import * as gps from "@/lib/ai/gps";
 import { groupKey, homeGroups } from "@/lib/google-home";
 import { googleHomeGroupsAction } from "./actions";
 
-// Lets the user choose which of their GPS groups show up in Google Home (each vehicle as a device, the group as its room).
+// Lets the user choose which of their GPS groups show up in Google Home (each vehicle as a device).
 export async function GoogleHomeGroups({ hash, embed, saved }: { hash: string; embed: boolean; saved: boolean }) {
   const data = await Promise.all([resolveUser(hash), gps.vehicles(hash), gps.userInfo(hash)]).catch(() => null);
   if (!data) return null;
@@ -22,7 +22,7 @@ export async function GoogleHomeGroups({ hash, embed, saved }: { hash: string; e
     <form action={googleHomeGroupsAction} className="panel" id="google-home" style={{ maxWidth: 720, margin: "10px auto 0", padding: 14 }}>
       <input type="hidden" name="embed" value={embed ? "1" : ""} />
       <div style={{ fontWeight: 700, marginBottom: 4 }}>Google Home: grupos que se agregan</div>
-      <p className="hint" style={{ margin: "0 0 8px" }}>Cada vehículo de los grupos marcados sale en Google Home como un dispositivo, con el grupo como habitación. Después de guardar, vuelve a vincular GPS Link en la app Google Home para que cargue los cambios.</p>
+      <p className="hint" style={{ margin: "0 0 8px" }}>Cada vehículo de los grupos marcados sale en Google Home como un dispositivo. Después de guardar, vuelve a vincular GPS Link en la app Google Home para que cargue los cambios.</p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", marginBottom: 10 }}>
         {list.map(([k, c]) => (
           <label key={k || "_none"} style={{ display: "flex", alignItems: "center", gap: 6 }}>
