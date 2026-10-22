@@ -4,18 +4,18 @@ import { prisma } from "./db";
 import { deviceStatuses, type DeviceStatus } from "./device-status";
 import { revokeByAccess } from "./oauth";
 
-// Google Home cloud-to-cloud integration: each vehicle is a "lock" (locked = engine blocked, PIN required),
+// Google Home cloud-to-cloud integration: each vehicle is a security panel (armed = engine blocked, PIN required),
 // with query-only ignition (OnOff) and GPS battery (EnergyStorage) for routines. No location: Google Home has no trait for it.
-type Input = { intent: string; payload?: { devices?: { id: string }[]; commands?: { devices: { id: string }[]; execution: { command: string; params?: { lock?: boolean }; challenge?: { pin?: string } }[] }[] } };
+type Input = { intent: string; payload?: { devices?: { id: string }[]; commands?: { devices: { id: string }[]; execution: { command: string; params?: { arm?: boolean }; challenge?: { pin?: string } }[] }[] } };
 export type SmartHomeRequest = { requestId: string; inputs: Input[] };
 
-const LOCK = "action.devices.types.LOCK";
-const TRAITS = ["action.devices.traits.LockUnlock", "action.devices.traits.OnOff", "action.devices.traits.EnergyStorage"];
+const PANEL = "action.devices.types.SECURITYSYSTEM";
+const TRAITS = ["action.devices.traits.ArmDisarm", "action.devices.traits.OnOff", "action.devices.traits.EnergyStorage"];
 
 export function deviceFor(v: Pick<gps.Vehicle, "id" | "name" | "plate">) {
   return {
     id: String(v.id),
-    type: LOCK,
+    type: PANEL,
     traits: TRAITS,
     name: { name: v.name, ...(v.plate ? { nicknames: [v.plate] } : {}) },
     willReportState: false,
@@ -29,8 +29,7 @@ export function stateFor(v: Pick<gps.Vehicle, "online" | "engine">, s: Pick<Devi
   return {
     online: v.online !== "offline",
     status: "SUCCESS",
-    isLocked: s?.blocked === true,
-    isJammed: false,
+    isArmed: s?.blocked === true,
     on: v.engine === true,
     ...(battery === null
       ? {}
@@ -67,8 +66,8 @@ export async function smartHome(req: SmartHomeRequest, user: AiUser, accessToken
         for (const { id } of cmd.devices) {
           const v = mine.get(id);
           if (!v) { commands.push({ ids: [id], status: "ERROR", errorCode: "deviceNotFound" }); continue; }
-          if (ex.command !== "action.devices.commands.LockUnlock") { commands.push({ ids: [id], status: "ERROR", errorCode: "functionNotSupported" }); continue; }
-          const lock = ex.params?.lock === true;
+          if (ex.command !== "action.devices.commands.ArmDisarm") { commands.push({ ids: [id], status: "ERROR", errorCode: "functionNotSupported" }); continue; }
+          const lock = ex.params?.arm === true;
           const pin = ex.challenge?.pin;
           if (!pin) { commands.push({ ids: [id], status: "ERROR", errorCode: "challengeNeeded", challengeNeeded: { type: "pinNeeded" } }); continue; }
           const check = await verifyPin(user.userId, String(pin));
@@ -83,7 +82,7 @@ export async function smartHome(req: SmartHomeRequest, user: AiUser, accessToken
             result = { ok: false, error: e instanceof Error ? e.message : String(e) };
           }
           await prisma.aiCommandLog.create({ data: { gpswoxUserId: user.userId, companyId: user.company?.id ?? null, deviceId: v.id, deviceName: v.name, command, channel: "google", ok: result.ok, error: result.error ?? null } });
-          commands.push(result.ok ? { ids: [id], status: "SUCCESS", states: { isLocked: lock, isJammed: false, online: true } } : { ids: [id], status: "ERROR", errorCode: result.error === "not supported" ? "functionNotSupported" : "transientError" });
+          commands.push(result.ok ? { ids: [id], status: "SUCCESS", states: { isArmed: lock, online: true } } : { ids: [id], status: "ERROR", errorCode: result.error === "not supported" ? "functionNotSupported" : "transientError" });
         }
       }
     }
