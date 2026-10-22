@@ -158,6 +158,18 @@ export async function syncDevices(company: Company, now = new Date()): Promise<v
   }
 }
 
+// Pushes login email, password and phone of a white label to its GPSWOX reseller user.
+export async function updateResellerLogin(company: Company, changes: { email?: string; password?: string; phone?: string }) {
+  if (!company.gpswoxUserId) return;
+  await updateReseller(company.gpswoxUserId, changes.email ?? company.email, {
+    devicesLimit: company.deviceLimit,
+    expiresAt: new Date(Date.now() + RESELLER_OPEN_DAYS * DAY_MS),
+    active: company.status !== "BLOCKED",
+    password: changes.password,
+    phone: changes.phone,
+  });
+}
+
 export async function setDeviceLimit(company: Company, deviceLimit: number) {
   if (company.gpswoxUserId) {
     await updateReseller(company.gpswoxUserId, company.email, { devicesLimit: deviceLimit, expiresAt: new Date(Date.now() + RESELLER_OPEN_DAYS * DAY_MS), active: company.status !== "BLOCKED" });
@@ -172,7 +184,7 @@ export async function createInvoice(company: Company, now = new Date()) {
   const devices = await prisma.billedDevice.findMany({ where: { companyId: company.id } });
   const found = devicesToBill(devices, period.end);
   const tiers = await prisma.priceTier.findMany();
-  const unit = found.items.length ? unitPrice(tiers, devices.filter((d) => !d.removedAt).length) : 0;
+  const unit = found.items.length ? (company.unitPriceCents ?? unitPrice(tiers, devices.filter((d) => !d.removedAt).length)) : 0;
   if (found.items.length && unit <= 0) console.warn(`[factura] ${company.id}: no hay precio para este tramo; los equipos no se facturan hasta que se configure.`);
   const items = unit > 0 ? found.items : [];
   const { newDevices, renewals } = unit > 0 ? found : { newDevices: 0, renewals: 0 };

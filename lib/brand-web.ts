@@ -41,7 +41,7 @@ async function brandFor(gpswoxUserId: number) {
   const chain = await brandChain(gpswoxUserId).catch(() => []);
   const ids = chain.map((c) => c.id);
   const companies = ids.length
-    ? await prisma.company.findMany({ where: { gpswoxUserId: { in: ids } }, select: { gpswoxUserId: true, websiteUrl: true, subdomain: true } })
+    ? await prisma.company.findMany({ where: { gpswoxUserId: { in: ids } }, select: { gpswoxUserId: true, websiteUrl: true, subdomain: true, customDomain: true } })
     : [];
   for (const id of ids) {
     const company = companies.find((c) => c.gpswoxUserId === id);
@@ -54,6 +54,7 @@ async function brandFor(gpswoxUserId: number) {
 // Platform origin a user should be sent to after logging in: its white label's subdomain, or track.
 export async function platformOriginFor(gpswoxUserId: number): Promise<string> {
   const brand = await brandFor(gpswoxUserId);
+  if (brand?.company?.customDomain) return `https://${brand.company.customDomain}`;
   return brand?.company?.subdomain ? brandOrigin(brand.company.subdomain) : trackerUrl();
 }
 

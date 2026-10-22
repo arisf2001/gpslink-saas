@@ -112,11 +112,17 @@ export async function setUserActive(email: string, active: boolean): Promise<voi
 
 export const setResellerActive = setUserActive;
 
-export async function updateReseller(id: number, email: string, changes: { devicesLimit: number; expiresAt: Date; active: boolean }): Promise<void> {
+export async function updateReseller(
+  id: number,
+  email: string,
+  changes: { devicesLimit: number; expiresAt: Date; active: boolean; password?: string; phone?: string },
+): Promise<void> {
   if (isMock()) return;
   await call("PUT", "client", {
     id,
     email,
+    ...(changes.password ? { password: changes.password, password_confirmation: changes.password } : {}),
+    ...(changes.phone !== undefined ? { phone_number: changes.phone } : {}),
     active: changes.active ? 1 : 0,
     group_id: 3,
     role_id: 3,

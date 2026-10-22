@@ -6,11 +6,13 @@ import { daysUntil } from "@/lib/lifecycle";
 import { getSession } from "@/lib/session";
 import { blockAction, extendAction, markInvoicePaidAction, mockDeviceAction, setBillingAction, setLimitAction, unblockAction } from "../../actions";
 import { AdminShell } from "../../admin-shell";
+import { enterAccountAction, enterPlatformAction, saveNotesAction, saveProfileAction, setPasswordAction } from "../actions";
+import { clientsUnder } from "@/lib/gpswox";
 
 export const dynamic = "force-dynamic";
 
-const OK: Record<string, string> = { pago: "Pago registrado.", bloqueada: "Empresa bloqueada.", desbloqueada: "Empresa desbloqueada.", extendida: "Prueba extendida.", limite: "Límite de equipos cambiado.", equipo: "Equipos de prueba agregados (modo prueba).", "cobro-on": "Cobro activado.", "cobro-off": "Cobro desactivado." };
-const ERR: Record<string, string> = { dias: "Días no válidos (1 a 400).", limite: "Límite no válido.", vencida: "Tiene facturas vencidas sin pagar: registra el pago primero." };
+const OK: Record<string, string> = { pago: "Pago registrado.", bloqueada: "Empresa bloqueada.", desbloqueada: "Empresa desbloqueada.", extendida: "Prueba extendida.", limite: "Límite de equipos cambiado.", equipo: "Equipos de prueba agregados (modo prueba).", "cobro-on": "Cobro activado.", "cobro-off": "Cobro desactivado.", perfil: "Perfil guardado.", clave: "Contraseña cambiada.", "clave-enviada": "Contraseña cambiada y enviada a su correo.", notas: "Notas guardadas." };
+const ERR: Record<string, string> = { dias: "Días no válidos (1 a 400).", limite: "Límite no válido.", vencida: "Tiene facturas vencidas sin pagar: registra el pago primero.", correo: "Correo no válido.", "correo-usado": "Ese correo ya lo usa otra empresa.", precio: "Precio no válido.", subdominio: "Subdominio no válido (3 a 30 letras, números o guiones).", dominio: "Dominio no válido, por ejemplo app.sumarca.com", "dominio-usado": "Ese subdominio o dominio ya lo usa otra empresa.", web: "Dirección web no válida.", clave: "La contraseña debe tener al menos 8 caracteres.", "sin-usuario": "Esta empresa no tiene usuario en la plataforma de rastreo." };
 
 export default async function EmpresaPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ ok?: string; error?: string; msg?: string }> }) {
   if (!(await getSession("admin"))) redirect("/admin");
@@ -29,6 +31,7 @@ export default async function EmpresaPage({ params, searchParams }: { params: Pr
   const blocked = company.status === "BLOCKED";
   const active = company.devices.filter((d) => !d.removedAt);
   const isMock = process.env.GPSWOX_MODE === "mock";
+  const clients = company.gpswoxUserId ? await clientsUnder(company.gpswoxUserId).catch(() => null) : [];
 
   return (
     <AdminShell>
@@ -47,6 +50,49 @@ export default async function EmpresaPage({ params, searchParams }: { params: Pr
           <dt>Usuario en GPS Link</dt><dd>{company.gpswoxUserId ? `#${company.gpswoxUserId}` : "—"}</dd>
           {company.provisionError && <><dt>Error GPS Link</dt><dd className="hint">{company.provisionError}</dd></>}
         </dl>
+      </div>
+
+      <div className="panel" style={{ marginTop: 18 }}>
+        <b>Soporte</b>
+        <p className="hint">Clientes en su plataforma: {clients === null ? "no se pudo leer" : clients.length} · Equipos activos: {active.length}</p>
+        <div className="row" style={{ gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+          <form action={enterPlatformAction} target="_blank"><input type="hidden" name="companyId" value={company.id} /><button className="btn sm" disabled={!company.gpswoxUserId}>Entrar a su plataforma de rastreo</button></form>
+          <form action={enterAccountAction} target="_blank"><input type="hidden" name="companyId" value={company.id} /><button className="btn sm s">Entrar a su cuenta (panel de la marca)</button></form>
+        </div>
+      </div>
+
+      <div className="grid" style={{ marginTop: 18 }}>
+        <form action={saveProfileAction} className="panel form" style={{ gridColumn: "1 / -1" }}>
+          <b>Perfil de la empresa</b>
+          <input type="hidden" name="companyId" value={company.id} />
+          <div className="grid">
+            <label>Nombre de la marca<input name="name" defaultValue={company.name} required /></label>
+            <label>Persona de contacto<input name="contactName" defaultValue={company.contactName} /></label>
+            <label>Correo (usuario para entrar)<input name="email" type="email" defaultValue={company.email} required /></label>
+            <label>Teléfono<input name="phone" defaultValue={company.phone} /></label>
+            <label>Precio especial por equipo (USD, vacío = precio general)<input name="unitPrice" inputMode="decimal" defaultValue={company.unitPriceCents == null ? "" : (company.unitPriceCents / 100).toFixed(2)} placeholder="Precio general" /></label>
+            <label>Color de la marca<input name="brandColor" type="color" defaultValue={company.brandColor ?? "#0F4C5C"} /></label>
+            <label>Subdominio (___.gpslinkusa.com)<input name="subdomain" defaultValue={company.subdomain ?? ""} /></label>
+            <label>Dominio propio de la plataforma<input name="customDomain" defaultValue={company.customDomain ?? ""} placeholder="app.sumarca.com" /></label>
+            <label>Su web (al cerrar sesión vuelven aquí)<input name="websiteUrl" defaultValue={company.websiteUrl ?? ""} placeholder="https://sumarca.com" /></label>
+          </div>
+          <p className="hint">Si cambias el correo o el teléfono, también se cambian en la plataforma de rastreo. Un dominio propio nuevo además necesita que lo apunten a tu servidor y su certificado: pídemelo.</p>
+          <button className="btn sm">Guardar perfil</button>
+        </form>
+        <form action={setPasswordAction} className="panel form">
+          <b>Contraseña</b>
+          <input type="hidden" name="companyId" value={company.id} />
+          <label>Nueva contraseña (vacía = crear una y enviarla)<input name="password" type="text" minLength={8} autoComplete="new-password" /></label>
+          <label className="row" style={{ gap: 6 }}><input type="checkbox" name="send" defaultChecked /> Enviarle el acceso a su correo</label>
+          <p className="hint">Se cambia en su cuenta y en la plataforma de rastreo.</p>
+          <button className="btn sm s">Cambiar contraseña</button>
+        </form>
+        <form action={saveNotesAction} className="panel form">
+          <b>Notas internas (solo tú las ves)</b>
+          <input type="hidden" name="companyId" value={company.id} />
+          <textarea name="notes" rows={5} defaultValue={company.adminNotes ?? ""} style={{ width: "100%" }} />
+          <button className="btn sm s">Guardar notas</button>
+        </form>
       </div>
 
       <div className="grid" style={{ marginTop: 18 }}>
