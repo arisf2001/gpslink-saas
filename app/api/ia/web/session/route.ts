@@ -1,5 +1,6 @@
 import { assistantConfig, rateLimit, resolveUser } from "@/lib/ai/assistant";
 import { setSession } from "@/lib/session";
+import { activationAvailable } from "@/lib/activation";
 
 const origins = () => (process.env.IA_WIDGET_ORIGINS ?? "https://track.gpslinkusa.com").split(",").map((o) => o.trim()).filter(Boolean);
 
@@ -14,7 +15,7 @@ export async function OPTIONS(req: Request) {
   return new Response(null, { status: headers ? 204 : 403, headers: headers ?? {} });
 }
 
-// Lets the floating button on the tracking platform open the assistant with the session the customer already has there.
+// Lets the tracking platform open the assistant and /activar with the session the customer already has there.
 export async function POST(req: Request) {
   const headers = corsHeaders(req);
   if (!headers) return Response.json({ error: "forbidden" }, { status: 403 });
@@ -26,7 +27,8 @@ export async function POST(req: Request) {
   const user = await resolveUser(hash).catch(() => null);
   if (!user?.userId) return Response.json({ enabled: false }, { status: 401, headers });
   const config = await assistantConfig(user);
-  if (!config.enabled) return Response.json({ enabled: false }, { headers });
+  const activation = (await activationAvailable(user.userId).catch(() => ({ ok: false }))).ok;
+  if (!config.enabled && !activation) return Response.json({ enabled: false }, { headers });
   await setSession("ia", hash);
-  return Response.json({ enabled: true, name: config.name, color: config.color }, { headers });
+  return Response.json({ enabled: config.enabled, activation, name: config.name, color: config.color }, { headers });
 }

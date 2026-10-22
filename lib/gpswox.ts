@@ -292,3 +292,53 @@ export async function brandChain(userId: number): Promise<{ id: number; reseller
     return chain;
   });
 }
+
+// Pay-per-device activation: the device is created under the admin account (hidden from the client) until it is paid.
+export async function deviceIdByImei(imei: string): Promise<number | null> {
+  if (isMock()) return (await prisma.mockDevice.findFirst({ where: { imei } }))?.id ?? null;
+  return withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT id FROM devices WHERE imei = ? AND deleted = 0 LIMIT 1", [imei]);
+    return rows[0] ? Number(rows[0].id) : null;
+  });
+}
+
+export async function createAdminDevice(imei: string, name: string): Promise<number> {
+  if (isMock()) return (await prisma.mockDevice.create({ data: { gpswoxUserId: 0, imei, name } })).id;
+  const hash = await apiHash();
+  const res = await fetch(`${trackerUrl()}/api/add_device?lang=es&user_api_hash=${encodeURIComponent(hash)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ imei, name }),
+  });
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok || Number(data.status) !== 1) throw new Error(`GPSWOX add_device respondió ${res.status}: ${JSON.stringify(data.errors ?? data.message ?? "")}`);
+  const id = Number(data.id ?? (data.item as { id?: number } | undefined)?.id) || (await deviceIdByImei(imei));
+  if (!id) throw new Error("GPSWOX no devolvió el id del equipo");
+  return id;
+}
+
+export async function addDeviceUser(deviceId: number, userId: number): Promise<void> {
+  if (isMock()) {
+    await prisma.mockDevice.update({ where: { id: deviceId }, data: { gpswoxUserId: userId } });
+    return;
+  }
+  await call("POST", `device/${deviceId}/user`, { user_id: userId });
+}
+
+// Last time each device reported (traccar server_time), null if it never did.
+export async function lastSignals(deviceIds: number[]): Promise<Map<number, Date | null>> {
+  const out = new Map<number, Date | null>();
+  if (!deviceIds.length) return out;
+  if (isMock()) {
+    for (const d of await prisma.mockDevice.findMany({ where: { id: { in: deviceIds } } })) out.set(d.id, d.reportedAt);
+    return out;
+  }
+  return withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>(
+      "SELECT d.id, t.server_time FROM devices d LEFT JOIN traccar_devices t ON t.id = d.traccar_device_id WHERE d.id IN (?)",
+      [deviceIds],
+    );
+    for (const r of rows) out.set(Number(r.id), r.server_time ? new Date(r.server_time) : null);
+    return out;
+  });
+}

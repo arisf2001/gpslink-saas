@@ -1,5 +1,6 @@
 import Stripe from "stripe";
 import { prisma } from "@/lib/db";
+import { applyActivationInvoice } from "@/lib/activation";
 import { applyCheckoutSession } from "@/lib/checkout";
 
 export async function POST(req: Request) {
@@ -15,6 +16,9 @@ export async function POST(req: Request) {
 
   if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
     await applyCheckoutSession(event.data.object);
+  }
+  if (event.type === "invoice.paid" || event.type === "invoice.payment_failed") {
+    await applyActivationInvoice(event.data.object, event.type === "invoice.paid");
   }
   await prisma.processedEvent.create({ data: { id: event.id } });
   return Response.json({ received: true });

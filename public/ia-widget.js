@@ -29,11 +29,31 @@
     document.body.appendChild(btn);
   }
 
+  // "Activa tu dispositivo ahora" in the tracking platform sidebar; retried because the sidebar renders late.
+  function activateLink(color, tries) {
+    var f = document.querySelector("#sidebar .sidebar-menu-footer");
+    if (!f) { if ((tries || 0) < 20) setTimeout(function () { activateLink(color, (tries || 0) + 1); }, 1000); return; }
+    if (f.querySelector(".gl-activar")) return;
+    var a = document.createElement("a");
+    a.href = base + "/activar";
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.className = "sidebar-menu-item gl-activar";
+    a.title = "Activa tu dispositivo ahora";
+    a.style.cssText = "color:" + color + ";font-weight:600";
+    a.innerHTML = '<span class="gl-ti"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg></span><span class="text" style="white-space:normal;line-height:1.2">Activa tu dispositivo ahora</span>';
+    f.insertBefore(a, f.firstChild);
+  }
+
   function start() {
     if (!hash) return mount((s && s.getAttribute("data-color")) || "#0F4C5C");
     fetch(base + "/api/ia/web/session", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_api_hash: hash }) })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) { if (d && d.enabled) mount(d.color || "#0F4C5C", d.name); })
+      .then(function (d) {
+        if (!d) return;
+        if (d.enabled) mount(d.color || "#0F4C5C", d.name);
+        if (d.activation) activateLink(d.color || "#0F4C5C");
+      })
       .catch(function () {});
   }
 
