@@ -18,7 +18,7 @@ export function startLifecycleScheduler() {
       .catch((e) => console.error("[alertas] failed:", e));
   const sims = () =>
     runSims()
-      .then((s) => (s.synced?.created || s.synced?.changed || s.notices || s.report) && console.log("[sim]", JSON.stringify(s)))
+      .then((s) => (s.synced?.created || s.synced?.changed || s.esim || s.profiles || s.notices || s.report) && console.log("[sim]", JSON.stringify(s)))
       .catch((e) => console.error("[sim] failed:", e));
   const activations = () =>
     runActivations()

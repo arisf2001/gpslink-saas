@@ -174,3 +174,47 @@ export async function syncOnce(now = new Date()) {
   }
   return applyCards(cards, "1nce", owners, now);
 }
+
+const ymd = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+
+// Copies SIM data to the GPS Link device profile, only where the profile is empty or has junk (e.g. a trailing "F").
+export async function fillDeviceProfiles(carrierCode?: string) {
+  if (isMock()) return 0;
+  const cards = await prisma.simCard.findMany({ where: { goneAt: null, deviceId: { not: null }, ...(carrierCode ? { carrierCode } : {}) } });
+  if (!cards.length) return 0;
+  return withGpswoxDb(async (conn) => {
+    let changed = 0;
+    for (const c of cards) {
+      const act = ymd(c.activatedAt);
+      const exp = ymd(c.expiresAt);
+      const [r] = await conn.execute(
+        `UPDATE devices SET
+           sim_number = IF(sim_number <> ? AND sim_number LIKE CONCAT(?, '%'), ?, sim_number),
+           msisdn = IF((msisdn IS NULL OR msisdn = '') AND ? IS NOT NULL, ?, msisdn),
+           sim_activation_date = IF((sim_activation_date IS NULL OR sim_activation_date < '1971-01-01') AND ? IS NOT NULL, ?, sim_activation_date),
+           sim_expiration_date = IF((sim_expiration_date IS NULL OR sim_expiration_date < '1971-01-01') AND ? IS NOT NULL, ?, sim_expiration_date)
+         WHERE id = ?`,
+        [c.iccid, c.iccid, c.iccid, c.msisdn, c.msisdn, act, act, exp, exp, c.deviceId],
+      );
+      changed += Number((r as { changedRows?: number }).changedRows ?? 0);
+    }
+    return changed;
+  });
+}
+
+// 1NCE quota is cheap to read (official API): refresh used data daily so the low-data alert is on time.
+export async function refreshOnceQuota() {
+  if (!onceConfigured()) return 0;
+  const cards = await prisma.simCard.findMany({ where: { carrierCode: "1nce", goneAt: null } });
+  if (!cards.length) return 0;
+  const token = await onceToken();
+  let n = 0;
+  for (const c of cards) {
+    const q = await onceQuota(token, c.iccid).catch(() => null);
+    const total = Number(q?.total_volume) || 0;
+    if (!q || !total || q.volume == null) continue;
+    await prisma.simCard.update({ where: { iccid: c.iccid }, data: { totalMb: total, usedMb: Math.max(0, total - Number(q.volume)), packageName: `${total} MB` } });
+    n++;
+  }
+  return n;
+}

@@ -6,7 +6,7 @@ import { BRAND, appUrl } from "../config";
 import { formatDate, formatMoney } from "../format";
 import { emailHtml, sendEmail, type ChannelResult } from "../notify";
 import { daysLeft, DAY, MONTHLY_CARRIERS, NEWSIM, ONCE, statusLabel } from "./carriers";
-import { syncNewsim, syncOnce, syncSims } from "./sync";
+import { fillDeviceProfiles, refreshOnceQuota, syncNewsim, syncOnce, syncSims } from "./sync";
 import { notify } from "../notifications";
 
 export const NOTICE_DAYS = 10;
@@ -229,13 +229,51 @@ export async function runEsimDueNotices(now = new Date()) {
   return fresh.length;
 }
 
+export const LOW_DATA = 0.2;
+
+// Owner alert when a SIM has less than 20% of its data left; again after a top-up changes the total.
+export async function runLowDataNotices() {
+  const cards = (await prisma.simCard.findMany({ where: { carrierCode: { in: MONTHLY_CARRIERS }, goneAt: null, totalMb: { gt: 0 } } })).filter(
+    (c) => (c.totalMb - c.usedMb) / c.totalMb < LOW_DATA,
+  );
+  const fresh: SimCard[] = [];
+  for (const c of cards) {
+    try {
+      await prisma.simNotice.create({ data: { iccid: c.iccid, kind: "low_data", dedupeKey: `${c.iccid}:${c.totalMb}:low_data` } });
+      fresh.push(c);
+    } catch {}
+  }
+  if (!fresh.length) return 0;
+  const left = (c: SimCard) => `${Math.max(0, c.totalMb - c.usedMb).toFixed(1)} MB de ${c.totalMb} MB (${Math.round(((c.totalMb - c.usedMb) / c.totalMb) * 100)} %)`;
+  await sendEmail(
+    reportTo(),
+    `${fresh.length} SIM con menos del ${LOW_DATA * 100} % de datos`,
+    emailHtml("SIM con pocos datos", [`A estas SIM les queda menos del ${LOW_DATA * 100} % de datos. Recárgalas con su proveedor:`, ...fresh.map((c) => `• ${c.iccid} · ${c.nickname ?? c.deviceName ?? "sin equipo"} · quedan ${left(c)}`)], {
+      label: "Abrir Tarjetas SIM",
+      url: `${appUrl()}/admin/sim?f=todas`,
+    }),
+  );
+  return fresh.length;
+}
+
+async function onceQuotaDaily(now: Date) {
+  try {
+    await prisma.simNotice.create({ data: { iccid: ONCE, kind: "quota", dedupeKey: `${ONCE}-quota:${dayKey(now)}` } });
+  } catch {
+    return 0;
+  }
+  return refreshOnceQuota().catch((e) => (console.error("[sim] 1nce quota:", (e as Error).message), 0));
+}
+
 export async function runSims(now = new Date()) {
   const synced = await syncSims(now);
   const monthly = await runMonthly(now);
   const esim = Object.keys(monthly.results).length ? monthly.results : null;
-  const notices = (await runSimNotices(now)) + (await runEsimDueNotices(now));
+  await onceQuotaDaily(now);
+  const profiles = await fillDeviceProfiles().catch((e) => (console.error("[sim] device profiles:", (e as Error).message), 0));
+  const notices = (await runSimNotices(now)) + (await runEsimDueNotices(now)) + (await runLowDataNotices());
   const report = synced ? await sendDailyReport(now) : false;
-  return { synced, esim, notices, report };
+  return { synced, esim, profiles, notices, report };
 }
 
 export async function applySimCheckout(session: Stripe.Checkout.Session) {
