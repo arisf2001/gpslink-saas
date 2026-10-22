@@ -4,7 +4,10 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { metaConfig, metaPhoneInfo, metaSend, metaSetting, sealSecret } from "@/lib/meta";
 import { getSession } from "@/lib/session";
-import { OWNER_WA, queueWa } from "@/lib/wa";
+import { resolveUser } from "@/lib/ai/assistant";
+import { login } from "@/lib/ai/gps";
+import { sendWhatsApp } from "@/lib/notify";
+import { DIRECT_WA, linkPhone, OWNER_WA, queueWa, waNumber } from "@/lib/wa";
 
 async function requireAdmin() {
   if (!(await getSession("admin"))) redirect("/admin");
@@ -75,4 +78,28 @@ export async function sendOwnerWaAction(formData: FormData) {
   if (!text) back("error", "Escribe el mensaje.");
   const queued = await queueWa(OWNER_WA, clean(formData.get("phone"), 20), text);
   back(queued ? "ok" : "error", queued ? "Mensaje en cola: sale por tu WhatsApp QR en unos segundos." : "Conecta tu WhatsApp por QR y revisa el número (con código de país).");
+}
+
+// The owner's (or a direct client's) personal WhatsApp: the assistant sends locations and alerts there through the QR number.
+export async function linkPersonalWaAction(formData: FormData) {
+  await requireAdmin();
+  const phone = waNumber(clean(formData.get("phone"), 20));
+  if (!phone) back("error", "Escribe el número con código de país, por ejemplo 18095551234.");
+  const email = clean(formData.get("email"), 120).toLowerCase();
+  const password = String(formData.get("password") ?? "");
+  if (!email || !password) back("error", "Escribe el correo y la contraseña de la plataforma.");
+  const hash = await login(email, password).catch(() => null);
+  if (!hash) back("error", "Correo o contraseña de la plataforma incorrectos.");
+  const user = await resolveUser(hash!).catch(() => null);
+  if (!user) back("error", "No pude leer ese usuario de la plataforma.");
+  if (user!.company) back("error", `Ese usuario es de la marca ${user!.company.name}: se conecta con el WhatsApp de esa marca.`);
+  await linkPhone(DIRECT_WA, phone!, user!);
+  const test = await sendWhatsApp(phone!, `Listo, este WhatsApp quedó conectado al usuario ${email} de GPS Link. Aquí te llegarán las ubicaciones que le pidas al asistente o a Alexa, y los avisos de tus vehículos.`);
+  back(test.ok ? "ok" : "error", test.ok ? `WhatsApp +${phone} conectado a ${email}. Te mandé un mensaje de prueba.` : `WhatsApp +${phone} conectado a ${email}, pero el mensaje de prueba no salió: conecta el número del negocio por QR arriba.`);
+}
+
+export async function unlinkPersonalWaAction(formData: FormData) {
+  await requireAdmin();
+  await prisma.waLink.deleteMany({ where: { companyId: DIRECT_WA, id: clean(formData.get("id"), 40) } });
+  back("ok", "WhatsApp desconectado.");
 }

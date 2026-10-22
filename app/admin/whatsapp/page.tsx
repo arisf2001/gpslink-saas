@@ -4,10 +4,10 @@ import { prisma } from "@/lib/db";
 import { formatDate } from "@/lib/format";
 import { metaSetting } from "@/lib/meta";
 import { getSession } from "@/lib/session";
-import { OWNER_WA } from "@/lib/wa";
+import { DIRECT_WA, OWNER_WA } from "@/lib/wa";
 import { WhatsAppStatus } from "../../cuenta/whatsapp/status";
 import { AdminShell } from "../admin-shell";
-import { connectOwnerWaAction, disconnectOwnerWaAction, saveMetaAction, sendMetaAction, sendOwnerWaAction, testMetaAction } from "./actions";
+import { connectOwnerWaAction, disconnectOwnerWaAction, linkPersonalWaAction, saveMetaAction, sendMetaAction, sendOwnerWaAction, testMetaAction, unlinkPersonalWaAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -15,10 +15,11 @@ export default async function AdminWhatsAppPage({ searchParams }: { searchParams
   if (!(await getSession("admin"))) redirect("/admin");
   const { ok, error } = await searchParams;
   const s = await metaSetting();
-  const [logs, qr, outbox] = await Promise.all([
+  const [logs, qr, outbox, personal] = await Promise.all([
     prisma.metaLog.findMany({ orderBy: { createdAt: "desc" }, take: 40 }),
     prisma.waSession.findUnique({ where: { companyId: OWNER_WA } }),
     prisma.waOutbox.findMany({ where: { companyId: OWNER_WA }, orderBy: { id: "desc" }, take: 15 }),
+    prisma.waLink.findMany({ where: { companyId: DIRECT_WA }, orderBy: { createdAt: "desc" }, take: 20 }),
   ]);
   const qrInitial = { want: qr?.want ?? false, status: qr?.status ?? "OFF", phone: qr?.phone ?? null, error: qr?.error ?? null, workerUp: true, qr: null };
   const webhook = `${appUrl()}/api/meta/webhook`;
@@ -62,6 +63,35 @@ export default async function AdminWhatsAppPage({ searchParams }: { searchParams
                   <td>+{o.phone}</td>
                   <td style={{ whiteSpace: "pre-wrap", maxWidth: 420 }}>{o.text.slice(0, 200)}</td>
                   <td>{o.status === "sent" ? "Enviado" : o.status === "pending" ? "En cola" : <span style={{ color: "#b91c1c" }}>{o.error}</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="panel" id="personal" style={{ margin: "14px 0" }}>
+        <h2 style={{ fontSize: 18, marginBottom: 10 }}>Mi WhatsApp personal</h2>
+        <p className="hint" style={{ marginBottom: 10 }}>
+          Conecta tu número personal a tu usuario de la plataforma. Ahí te llegan las ubicaciones que le pidas al asistente o a Alexa (“mándame por WhatsApp dónde está el camión”) y los avisos de tus vehículos. Los mensajes salen desde el número del negocio conectado por QR arriba.
+        </p>
+        <form action={linkPersonalWaAction} className="form" style={{ maxWidth: 620 }}>
+          <label>Tu número personal (con código de país)<input name="phone" required placeholder="18095551234" inputMode="tel" /></label>
+          <label>Correo de tu usuario de la plataforma<input name="email" type="email" required autoComplete="off" /></label>
+          <label>Contraseña de la plataforma<input name="password" type="password" required autoComplete="off" /></label>
+          <button className="btn sm dark">Conectar mi WhatsApp</button>
+          <p className="hint">La contraseña no se guarda: solo confirma que el usuario es tuyo.</p>
+        </form>
+        {personal.length > 0 && (
+          <table className="t" style={{ marginTop: 14 }}>
+            <thead><tr><th>Número</th><th>Usuario</th><th>Desde</th><th></th></tr></thead>
+            <tbody>
+              {personal.map((l) => (
+                <tr key={l.id}>
+                  <td>+{l.phone}</td>
+                  <td>#{l.gpswoxUserId}</td>
+                  <td>{formatDate(l.createdAt)}</td>
+                  <td><form action={unlinkPersonalWaAction}><input type="hidden" name="id" value={l.id} /><button className="btn sm red">Quitar</button></form></td>
                 </tr>
               ))}
             </tbody>
