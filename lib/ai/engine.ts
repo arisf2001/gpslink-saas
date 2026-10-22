@@ -40,7 +40,7 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
     `Current local time (America/Santo_Domingo): ${localNow()}.`,
     "You only know the customer's own vehicles, through the tools. Never invent locations, speeds or data; if a tool fails, say so.",
     "Be brief and concrete (2-4 short sentences). Include the address, speed, whether the ignition is on/off when known and how long ago the last report was.",
-    "Say where a vehicle is with get_vehicle's location: street, neighbourhood or city, state, and \"near <near>\" with the distance when near is given. Never read latitude/longitude to the customer unless location and address are both unknown.",
+    "Say where a vehicle is with get_vehicle's location: street, neighbourhood or city, state, and \"near <near>\" with the distance when near is given. Never read latitude/longitude to the customer unless location and address are both unknown. Say how long ago it reported with last_report_ago (never a raw count of minutes).",
     "When you describe one vehicle, add one short line with its GPS device status from gps_device: battery %, GSM signal (x/4), satellites, whether it is connected to the vehicle power and whether the engine is blocked. Say \"no disponible\" for missing values; never invent them. If it is not connected to the vehicle power, point it out.",
     "When several vehicles match, ask which one. If the customer has only one vehicle, use it.",
     "Customers may refer to a vehicle by its nickname, color, make, model or type (e.g. 'la jeepeta', 'el carro rojo', 'el Toyota'): pass those words as the list_vehicles search, and mention the nickname when you answer.",
@@ -51,6 +51,7 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
       : "The app/web shows buttons for map, Street View and history, so you do not need to paste links.",
     "Do not answer questions unrelated to the customer's vehicles or GPS tracking; politely redirect.",
     deviceId ? `The vehicle currently open on screen has device_id ${deviceId}; "it" refers to that vehicle.` : "",
+    `Always answer in ${lang === "en" ? "English" : "Spanish"}, even when the tool data or the question is in another language.`,
   ].filter(Boolean).join("\n");
 }
 
@@ -70,6 +71,16 @@ async function openai(model: string, messages: Msg[], tools: typeof TOOLS, effor
 
 function minutesAgo(ts: number): number | null {
   return ts ? Math.max(0, Math.round((Date.now() / 1000 - ts) / 60)) : null;
+}
+
+export function timeAgo(minutes: number | null, lang: Lang): string | null {
+  if (minutes === null) return null;
+  const unit = (n: number, es: string, en: string) => `${n} ${t(lang, es, en)}${n === 1 ? "" : lang === "en" ? "s" : es.endsWith("a") || es.endsWith("o") ? "s" : "es"}`;
+  if (minutes < 60) return unit(minutes, "minuto", "minute");
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return minutes % 60 ? `${unit(hours, "hora", "hour")} ${t(lang, "y", "and")} ${unit(minutes % 60, "minuto", "minute")}` : unit(hours, "hora", "hour");
+  const days = Math.floor(hours / 24);
+  return days < 60 ? unit(days, "día", "day") : unit(Math.floor(days / 30), "mes", "month");
 }
 
 async function deviceInfo(deviceId: number) {
@@ -117,7 +128,7 @@ export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => 
         device_id: v.id, name: v.name, plate: v.plate, ...describe((await profilesFor([v.id])).get(v.id)), status: v.online, speed: `${v.speed} ${v.speedUnit}`,
         ignition: v.engine === null ? "unknown" : v.engine ? "on" : "off", address: v.address ?? "unknown",
         location: (await reverseGeocode(v.lat, v.lng, lang)) ?? "unknown",
-        lat: v.lat, lng: v.lng, last_report: v.time, minutes_since_last_report: minutesAgo(v.timestamp), stopped_for: v.stopDuration,
+        lat: v.lat, lng: v.lng, last_report: v.time, minutes_since_last_report: minutesAgo(v.timestamp), last_report_ago: timeAgo(minutesAgo(v.timestamp), lang), stopped_for: v.stopDuration,
         map_url: gps.mapUrl(v.lat, v.lng), street_view_url: gps.streetViewUrl(v.lat, v.lng),
         gps_device: await deviceInfo(v.id),
       };

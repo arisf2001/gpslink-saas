@@ -23,3 +23,14 @@ test("placeFrom ignores far or unnamed points of interest", () => {
 test("meters is roughly correct", () => {
   assert.ok(Math.abs(meters(18.4712, -69.9318, 18.4812, -69.9318) - 1112) < 5);
 });
+
+test("timeAgo speaks minutes, hours, days and months", async () => {
+  const { timeAgo } = await import("../lib/ai/engine");
+  assert.equal(timeAgo(1, "es"), "1 minuto");
+  assert.equal(timeAgo(5, "en"), "5 minutes");
+  assert.equal(timeAgo(200, "es"), "3 horas y 20 minutos");
+  assert.equal(timeAgo(60 * 24 * 3, "es"), "3 días");
+  assert.equal(timeAgo(279359, "es"), "6 meses");
+  assert.equal(timeAgo(279359, "en"), "6 months");
+  assert.equal(timeAgo(null, "es"), null);
+});
