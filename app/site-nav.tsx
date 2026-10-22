@@ -2,6 +2,7 @@ import Link from "next/link";
 import { BRAND } from "@/lib/config";
 import { getLang } from "@/lib/lang";
 import { brandForHost } from "@/lib/brand-host";
+import { mediaUrl } from "@/lib/site-media";
 
 // `path` turns on the English/Español switch (public pages only).
 export async function SiteNav({ path }: { path?: string } = {}) {
@@ -19,7 +20,7 @@ export async function SiteNav({ path }: { path?: string } = {}) {
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a href="/" className="brand">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              {brand.site.logo ? <img src={brand.site.logo} alt={name} style={{ height: 38, width: "auto", maxWidth: 200 }} /> : name}
+              {brand.site.logo ? <img src={mediaUrl(brand.site.logo)} alt={name} style={{ height: 38, width: "auto", maxWidth: 200 }} /> : name}
             </a>
             <div className="links">
               <a href="/entrar" style={{ fontWeight: 700, color: "var(--p)" }}>Entrar</a>
