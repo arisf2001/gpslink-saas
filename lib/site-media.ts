@@ -23,7 +23,7 @@ export const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 const NAME = /^[a-z0-9]+-[a-f0-9]{16}\.(png|jpg|webp|gif|ico)$/;
 
 function mediaDir(): string {
-  return process.env.SITE_MEDIA_DIR ?? path.join(process.cwd(), "data", "site-media");
+  return process.env.SITE_MEDIA_DIR ?? path.join(/*turbopackIgnore: true*/ process.cwd(), "data", "site-media");
 }
 
 export function mediaUrl(file: string): string {

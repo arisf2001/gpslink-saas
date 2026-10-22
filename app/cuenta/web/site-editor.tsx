@@ -12,7 +12,7 @@ const SECTION_LABELS: Record<(typeof SECTION_KEYS)[number], string> = {
 const SOCIAL_LABELS: Record<(typeof SOCIAL_KEYS)[number], string> = { facebook: "Facebook", instagram: "Instagram", tiktok: "TikTok", youtube: "YouTube" };
 const box: React.CSSProperties = { border: "1px solid var(--line)", borderRadius: 12, padding: "12px 16px", background: "#fff" };
 const sum: React.CSSProperties = { cursor: "pointer", fontWeight: 800, fontSize: 15 };
-const grid2: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 12, marginTop: 12 };
+const grid2: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 12, marginTop: 12, alignItems: "start" };
 
 function Text({ site, k, label, area }: { site: SiteData; k: TextKey; label: string; area?: boolean }) {
   return (
