@@ -90,13 +90,14 @@ export async function linkPhone(companyId: string, phone: string, user: AiUser) 
 }
 
 async function linkFromProfile(phone: string): Promise<boolean> {
-  const ids = await usersByPhone(phone).catch(() => []);
+  const ids = await usersByPhone(phone).catch((): number[] => []);
   const link = await prisma.waLink.findUnique({ where: { companyId_phone: { companyId: OWNER_WA, phone } } });
-  if (ids.length !== 1) {
+  if (!ids.length) {
     if (link) await prisma.waLink.delete({ where: { id: link.id } });
     return false;
   }
-  if (link?.gpswoxUserId === ids[0] && unseal(link.hashSealed)) return true;
+  // Several users can share a phone: keep the one already linked, else the first (admins first).
+  if (link && ids.includes(link.gpswoxUserId) && unseal(link.hashSealed)) return true;
   const hash = await userApiHash(ids[0]).catch(() => null);
   const user = hash ? await resolveUser(hash).catch(() => null) : null;
   if (!user) return false;
