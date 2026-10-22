@@ -2,6 +2,7 @@ import { verifyPin, type AiUser } from "./ai/assistant";
 import * as gps from "./ai/gps";
 import { prisma } from "./db";
 import { deviceStatuses, type DeviceStatus } from "./device-status";
+import { ownRecentDevices } from "./gpswox";
 import { revokeByAccess } from "./oauth";
 
 // Google Home cloud-to-cloud integration: each vehicle is a security panel (armed = engine blocked, PIN required),
@@ -44,7 +45,12 @@ export async function smartHome(req: SmartHomeRequest, user: AiUser, accessToken
     await revokeByAccess(accessToken);
     return {};
   }
-  const fleet = await gps.vehicles(user.hash);
+  let fleet = await gps.vehicles(user.hash);
+  // The owner's admin user sees every client's device: Google Home gets only his own vehicles that reported in the last month.
+  if ((await gps.userInfo(user.hash)).groupId === 1) {
+    const own = await ownRecentDevices(user.userId, [73]);
+    fleet = fleet.filter((v) => own.has(v.id));
+  }
   const mine = new Map(fleet.map((v) => [String(v.id), v]));
   if (intent === "action.devices.SYNC") {
     return { requestId: req.requestId, payload: { agentUserId: String(user.userId), devices: fleet.map(deviceFor) } };
