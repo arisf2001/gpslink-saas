@@ -13,6 +13,7 @@ const LINKS = [
   { key: "correo", href: "/cuenta/correo", label: "Mi correo" },
   { key: "web", href: "/cuenta/web", label: "Mi web" },
   { key: "admins", href: "/cuenta/administradores", label: "Administradores" },
+  { key: "soporte", href: "/cuenta/soporte", label: "Soporte" },
 ] as const;
 
 export async function CuentaNav({ active }: { active: (typeof LINKS)[number]["key"] }) {

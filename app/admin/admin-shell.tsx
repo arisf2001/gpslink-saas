@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { prisma } from "@/lib/db";
 import { adminLogoutAction } from "./actions";
 
-export function AdminShell({ children }: { children: React.ReactNode }) {
+export async function AdminShell({ children }: { children: React.ReactNode }) {
+  const openTickets = await prisma.supportTicket.count({ where: { status: "abierto" } });
   return (
     <>
       <nav className="top">
@@ -19,6 +21,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             <Link href="/admin/activacion">Activación</Link>
             <Link href="/admin/ia">Asistente IA</Link>
             <Link href="/admin/whatsapp">WhatsApp</Link>
+            <Link href="/admin/tickets">Tickets{openTickets ? ` (${openTickets})` : ""}</Link>
             <form action={adminLogoutAction}><button className="btn sm s">Salir</button></form>
           </div>
         </div>
