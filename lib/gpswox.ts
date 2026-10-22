@@ -369,3 +369,12 @@ export async function lastSignals(deviceIds: number[]): Promise<Map<number, Date
     return out;
   });
 }
+
+// WhatsApp number saved in the user's GPS Link (GPSWOX) profile.
+export async function userPhone(userId: number): Promise<string | null> {
+  if (!userId || isMock()) return null;
+  return withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT phone_number FROM users WHERE id = ?", [userId]);
+    return rows[0]?.phone_number ? String(rows[0].phone_number) : null;
+  });
+}

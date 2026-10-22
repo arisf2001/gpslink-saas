@@ -5,7 +5,7 @@ import { findPlace, insidePlace, meters } from "./ai/geocode";
 import { adminSender, CUT_SPEED_KMH, engineSequence, HOW_TO_RESUME, userDeviceIds, userSender } from "./border-zones";
 import { prisma } from "./db";
 import { alertSetting, deviceUsers } from "./device-status";
-import { isMock, withGpswoxDb } from "./gpswox";
+import { isMock, userPhone, withGpswoxDb } from "./gpswox";
 import { notificationRules, notify, type Channels, type Message } from "./notifications";
 
 // Customer red zones (created through the assistant): alert on entry and stop the engine at <= 20 km/h, like the Haiti border red zone.
@@ -138,7 +138,8 @@ async function send(kind: string, zone: RedZone, p: Position, msg: Message, rule
   const company = billed?.company && billed.company.status !== "CANCELED" ? billed.company : null;
   const done = new Set<string>();
   const owner = (await deviceUsers([p.deviceId])).find((u) => u.userId === zone.gpswoxUserId);
-  await notify(kind, { gpswoxUserId: zone.gpswoxUserId, email: owner?.email ?? null, companyId: company?.id ?? null }, msg, { rules, done });
+  const phone = await userPhone(zone.gpswoxUserId).catch(() => null);
+  await notify(kind, { gpswoxUserId: zone.gpswoxUserId, email: owner?.email ?? null, phone, companyId: company?.id ?? null }, msg, { rules, done });
   await prisma.deviceAlert.create({ data: { deviceId: p.deviceId, deviceName: p.name, companyId: company?.id ?? null, kind: `red_${kind}`, sentTo: done.size } });
 }
 

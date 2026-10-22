@@ -73,7 +73,7 @@ export default async function AdminWhatsAppPage({ searchParams }: { searchParams
       <div className="panel" id="personal" style={{ margin: "14px 0" }}>
         <h2 style={{ fontSize: 18, marginBottom: 10 }}>Mi WhatsApp personal</h2>
         <p className="hint" style={{ marginBottom: 10 }}>
-          Conecta tu número personal a tu usuario de la plataforma. Ahí te llegan las ubicaciones que le pidas al asistente o a Alexa (“mándame por WhatsApp dónde está el camión”) y los avisos de tus vehículos. Los mensajes salen desde el número del negocio conectado por QR arriba.
+          El asistente y Alexa usan solos el WhatsApp que está en el perfil de cada usuario de la plataforma. Usa esto solo si quieres agregar otro número a tu usuario. Ahí te llegan las ubicaciones que le pidas al asistente o a Alexa (“mándame por WhatsApp dónde está el camión”) y los avisos de tus vehículos. Los mensajes salen desde el número del negocio conectado por QR arriba.
         </p>
         <form action={linkPersonalWaAction} className="form" style={{ maxWidth: 620 }}>
           <label>Tu número personal (con código de país)<input name="phone" required placeholder="18095551234" inputMode="tel" /></label>
