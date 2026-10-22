@@ -74,7 +74,7 @@ const KNOWN = new Set(PERM_GROUPS.flatMap(([, items]) => items.map(([name]) => n
 // Groups for display; names GPSWOX returns that we have no label for go to "Otras opciones".
 export function groupedPerms(available: PermMap): [string, [string, string][]][] {
   const groups = PERM_GROUPS.map(([title, items]) => [title, items.filter(([name]) => name in available)] as [string, [string, string][]]);
-  const other = Object.keys(available).filter((n) => !KNOWN.has(n)).map((n) => [n, n] as [string, string]);
+  const other = Object.keys(available).filter((n) => !KNOWN.has(n) && MODES.some(([mode]) => available[n][mode])).map((n) => [n, n] as [string, string]);
   return [...groups, ["Otras opciones", other] as [string, [string, string][]]].filter(([, items]) => items.length);
 }
 
