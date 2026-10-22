@@ -7,10 +7,20 @@ import { getSession } from "@/lib/session";
 import { SiteNav } from "../../site-nav";
 import { CuentaNav } from "../cuenta-nav";
 import { SubdomainForm, WebsiteForm } from "./website-form";
+import { SiteEditor } from "./site-editor";
+import { siteFor } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
 
-export default async function MiWebPage() {
+const MESSAGES: Record<string, string> = {
+  sitio: "Tu web quedó guardada.",
+  restaurado: "Se restauraron los textos y colores originales.",
+  "imagen-tipo": "Esa imagen no sirve. Usa PNG, JPG, WEBP, GIF o ICO.",
+  "imagen-grande": "Esa imagen pesa más de 3 MB. Usa una más pequeña.",
+};
+
+export default async function MiWebPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+  const { ok, error } = await searchParams;
   const companyId = await getSession("company");
   await requireTab("web");
   if (!companyId) redirect("/cuenta");
@@ -24,6 +34,16 @@ export default async function MiWebPage() {
       <SiteNav />
       <div className="wrap">
         <CuentaNav active="web" />
+        <div className="panel" id="editor" style={{ marginBottom: 18 }}>
+          <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 6 }}>Tu página web pública</h2>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            Aquí cambias todo lo que ve el público en tu web: logo, colores, textos, productos, preguntas y botones. Toca cada parte para abrirla, cambia lo que quieras y dale a Guardar.
+            {company.websiteUrl ? <> Tu web: <a href={company.websiteUrl} target="_blank" rel="noreferrer" style={{ color: "var(--p)", fontWeight: 700 }}>{company.websiteUrl}</a>.</> : " Cuando tengas tu dominio, pídenos conectarlo a esta web."}
+          </p>
+          {ok && MESSAGES[ok] && <div className="ok" style={{ marginBottom: 12 }}>{MESSAGES[ok]}</div>}
+          {error && MESSAGES[error] && <div className="err" style={{ marginBottom: 12 }}>{MESSAGES[error]}</div>}
+          <SiteEditor site={siteFor(company)} slug={company.slug} />
+        </div>
         <div className="panel">
           <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 6 }}>Tu plataforma con tu nombre</h2>
           <p className="hint" style={{ marginBottom: 12 }}>Tus clientes entran a tu plataforma de rastreo en esta dirección, ven tu marca y se quedan ahí. Cuando tengas tu propio dominio, pídenos conectarlo.</p>

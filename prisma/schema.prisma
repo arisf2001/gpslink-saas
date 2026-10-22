@@ -77,6 +77,7 @@ model Company {
   adminNotes           String?        @db.Text
   hiddenTabs           String?        @db.VarChar(200)
   clientPerms          Json?
+  siteData             Json?
   activationEnabled    Boolean        @default(false)
   clientPlans          ClientPlan[]
   endClients           EndClient[]
