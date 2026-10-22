@@ -46,8 +46,11 @@ export async function smartHome(req: SmartHomeRequest, user: AiUser, accessToken
     return {};
   }
   let fleet = await gps.vehicles(user.hash);
-  // The owner's admin user sees every client's device: Google Home gets only the vehicles he put in a group.
-  if ((await gps.userInfo(user.hash)).groupId === 1) fleet = fleet.filter((v) => v.group);
+  // The owner's admin user sees every client's device: Google Home gets only his personal group.
+  if ((await gps.userInfo(user.hash)).groupId === 1) {
+    const own = (process.env.GOOGLE_HOME_ADMIN_GROUP || "Familia").trim().toLowerCase();
+    fleet = fleet.filter((v) => v.group?.toLowerCase() === own);
+  }
   const mine = new Map(fleet.map((v) => [String(v.id), v]));
   if (intent === "action.devices.SYNC") {
     return { requestId: req.requestId, payload: { agentUserId: String(user.userId), devices: fleet.map(deviceFor) } };
