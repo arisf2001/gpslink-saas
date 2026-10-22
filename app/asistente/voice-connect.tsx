@@ -8,7 +8,7 @@ export function VoiceConnect({ geminiUrl, alexaUrl, color }: { geminiUrl: string
   const [copied, setCopied] = useState(false);
   const toggle = (v: "gemini" | "alexa") => setOpen((o) => (o === v ? null : v));
   return (
-    <div className="panel" style={{ maxWidth: 720, margin: "10px auto 0", padding: 14 }}>
+    <div className="panel" id="voz" style={{ maxWidth: 720, margin: "10px auto 0", padding: 14 }}>
       <div style={{ fontWeight: 700, marginBottom: 8 }}>Pregúntale a tu asistente de voz</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button className="btn sm" style={{ background: color, borderColor: color, color: "#fff" }} onClick={() => toggle("gemini")}>Conectar con Gemini</button>

@@ -378,3 +378,12 @@ export async function userPhone(userId: number): Promise<string | null> {
     return rows[0]?.phone_number ? String(rows[0].phone_number) : null;
   });
 }
+
+// GPS Link API key of a user, to open the assistant from the tracking platform without asking the password again.
+export async function userApiHash(userId: number): Promise<string | null> {
+  if (!userId || isMock()) return null;
+  return withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT api_hash FROM users WHERE id = ? AND active = 1", [userId]);
+    return rows[0]?.api_hash ? String(rows[0].api_hash) : null;
+  });
+}
