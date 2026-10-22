@@ -1,7 +1,7 @@
 import type { Lang } from "./assistant";
 
 // Reverse geocoding with OpenStreetMap Nominatim (free; policy: max 1 request/second, identify the app, cache results).
-export type Place = { street: string | null; neighbourhood: string | null; city: string | null; state: string | null; country: string | null; near: string | null; nearMeters: number | null };
+export type Place = { street: string | null; neighbourhood: string | null; city: string | null; state: string | null; country: string | null; near: string | null; nearMeters: number | null; nearKind: string | null; nearStreet: string | null };
 
 const UA = "GPSLinkUSA/1.0 (https://gpslinkusa.com; arisf2001@gmail.com)";
 const cache = new Map<string, { at: number; place: Place | null }>();
@@ -40,18 +40,42 @@ export function meters(lat1: number, lng1: number, lat2: number, lng2: number): 
   return Math.round(12742000 * Math.asin(Math.sqrt(a)));
 }
 
-export function placeFrom(addr: NominatimResult | null, poi: NominatimResult | null, lat: number, lng: number): Place | null {
+const KINDS: Record<string, [string, string]> = {
+  fuel: ["estación de combustible", "gas station"], park: ["parque", "park"], university: ["universidad", "university"], college: ["instituto", "college"], school: ["escuela", "school"],
+  hospital: ["hospital", "hospital"], clinic: ["clínica", "clinic"], pharmacy: ["farmacia", "pharmacy"], bank: ["banco", "bank"], atm: ["cajero", "ATM"],
+  place_of_worship: ["iglesia", "place of worship"], restaurant: ["restaurante", "restaurant"], fast_food: ["comida rápida", "fast food"], cafe: ["cafetería", "café"], bar: ["bar", "bar"],
+  mall: ["plaza comercial", "shopping mall"], supermarket: ["supermercado", "supermarket"], convenience: ["colmado o tienda", "convenience store"], hardware: ["ferretería", "hardware store"],
+  car_repair: ["taller", "car repair shop"], car: ["concesionario", "car dealer"], parking: ["parqueo", "parking lot"], marketplace: ["mercado", "market"], police: ["policía", "police station"],
+  fire_station: ["bomberos", "fire station"], hotel: ["hotel", "hotel"], stadium: ["estadio", "stadium"], sports_centre: ["centro deportivo", "sports centre"], playground: ["parque infantil", "playground"],
+  townhall: ["ayuntamiento", "town hall"], post_office: ["correo", "post office"], bus_station: ["terminal de autobuses", "bus station"], aerodrome: ["aeropuerto", "airport"], cemetery: ["cementerio", "cemetery"],
+  pitch: ["cancha", "sports field"], gym: ["gimnasio", "gym"], fitness_centre: ["gimnasio", "gym"], department_store: ["tienda por departamentos", "department store"], clothes: ["tienda de ropa", "clothing store"],
+};
+
+export function placeKind(category: string | undefined, type: string | undefined, lang: Lang): string | null {
+  const k = KINDS[type ?? ""];
+  if (k) return lang === "en" ? k[1] : k[0];
+  if (category === "shop") return lang === "en" ? "store" : "tienda";
+  if (category === "leisure") return lang === "en" ? "recreation area" : "área recreativa";
+  if (category === "tourism") return lang === "en" ? "tourist place" : "lugar turístico";
+  return null;
+}
+
+export function placeFrom(addr: NominatimResult | null, poi: NominatimResult | null, lat: number, lng: number, lang: Lang = "es"): Place | null {
   const a = addr?.address;
   if (!a) return null;
   const road = a.road ?? a.pedestrian ?? a.footway ?? a.highway ?? null;
   const street = road ? (a.house_number ? `${road} ${a.house_number}` : road) : null;
   let near: string | null = null;
   let nearMeters: number | null = null;
+  let nearKind: string | null = null;
+  let nearStreet: string | null = null;
   if (poi?.name && poi.lat && poi.lon) {
     const d = meters(lat, lng, Number(poi.lat), Number(poi.lon));
     if (d <= 500) {
       near = poi.name;
       nearMeters = d;
+      nearKind = placeKind(poi.category, poi.type, lang);
+      nearStreet = poi.address?.road ?? null;
     }
   }
   return {
@@ -62,6 +86,8 @@ export function placeFrom(addr: NominatimResult | null, poi: NominatimResult | n
     country: a.country ?? null,
     near,
     nearMeters,
+    nearKind,
+    nearStreet,
   };
 }
 
@@ -71,7 +97,7 @@ export async function reverseGeocode(lat: number, lng: number, lang: Lang): Prom
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < 24 * 3600_000) return hit.place;
   const [addr, poi] = await Promise.all([nominatim(lat, lng, lang, false), nominatim(lat, lng, lang, true)]);
-  const place = placeFrom(addr, poi, lat, lng);
+  const place = placeFrom(addr, poi, lat, lng, lang);
   if (place || addr) cache.set(key, { at: Date.now(), place });
   if (cache.size > 20000) cache.delete(cache.keys().next().value!);
   return place;

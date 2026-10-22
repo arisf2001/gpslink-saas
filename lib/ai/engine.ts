@@ -29,6 +29,7 @@ const TOOLS = [
   { type: "function", function: { name: "list_vehicles", description: "List the customer's vehicles with status, make, model, year, color, type and nickname. Use it to find a vehicle by name, plate, nickname, color, make, model or type (e.g. 'la jeepeta', 'el carro rojo', 'el Toyota').", parameters: { type: "object", properties: { search: { type: "string", description: "Optional filter: name, plate, nickname, color, make, model or type, in the customer's words" } }, additionalProperties: false } } },
   { type: "function", function: { name: "get_vehicle", description: "Current location, address, speed, ignition and last report of one vehicle.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
   { type: "function", function: { name: "vehicles_in_place", description: "Which of the customer's vehicles are now inside a city, state, province, neighbourhood or country (e.g. 'Allentown', 'Florida', 'Santo Domingo', 'República Dominicana').", parameters: { type: "object", properties: { place: { type: "string", description: "Place name, adding the state or country when it is ambiguous (e.g. 'Santiago, República Dominicana')" } }, required: ["place"], additionalProperties: false } } },
+  { type: "function", function: { name: "send_location_whatsapp", description: "Send one vehicle's current location (address, nearby place and map link) to the customer's OWN WhatsApp linked to this account. It never sends to other numbers.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
   { type: "function", function: { name: "get_history", description: "Trips summary for a vehicle between two local datetimes (America/Santo_Domingo): distance, top speed, moving/stopped time and stops.", parameters: { type: "object", properties: { device_id: { type: "integer" }, from: { type: "string", description: "YYYY-MM-DD HH:MM" }, to: { type: "string", description: "YYYY-MM-DD HH:MM" } }, required: ["device_id", "from", "to"], additionalProperties: false } } },
   { type: "function", function: { name: "create_red_zone", description: `Create a red zone like the Haiti border one: alert when a vehicle enters and automatic engine stop when it slows to ${20} km/h inside. It starts INACTIVE and only works after the customer confirms with the PIN.`, parameters: { type: "object", properties: { place: { type: "string", description: "City, neighbourhood, address or place, with state or country when ambiguous (or a short name when lat/lng are given)" }, lat: { type: "number", description: "Optional center latitude, e.g. a vehicle's current position from get_vehicle" }, lng: { type: "number", description: "Optional center longitude" }, radius_km: { type: "number", description: `Optional radius around the place in km (max ${200}). Omit to use the whole area of a city/neighbourhood/state.` }, device_ids: { type: "array", items: { type: "integer" }, description: "Vehicles it applies to; empty or omitted = all the customer's vehicles" }, name: { type: "string", description: "Optional short name" } }, required: ["place"], additionalProperties: false } } },
   { type: "function", function: { name: "list_red_zones", description: "List the customer's red zones (active or waiting for PIN).", parameters: { type: "object", properties: {}, additionalProperties: false } } },
@@ -47,7 +48,7 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
     `Current local time (America/Santo_Domingo): ${localNow()}.`,
     "You only know the customer's own vehicles, through the tools. Never invent locations, speeds or data; if a tool fails, say so.",
     "Be brief and concrete (2-4 short sentences). Include the address, speed, whether the ignition is on/off when known and how long ago the last report was.",
-    "Say where a vehicle is with get_vehicle's location: street, neighbourhood or city, state, and \"near <near>\" with the distance when near is given. Never read latitude/longitude to the customer unless location and address are both unknown. Say how long ago it reported with last_report_ago (never a raw count of minutes).",
+    "Say where a vehicle is with get_vehicle's location: street, neighbourhood or city, state, and \"near <near>\" with the distance when near is given. When location.near is given, say what kind of place it is (near_kind) and its street, e.g. 'a 200 metros de la estación de combustible Shell de la Avenida Duarte' or 'en el parqueo de la Plaza Las Américas'. To send a location by WhatsApp use send_location_whatsapp (only to the customer's own linked WhatsApp). Never read latitude/longitude to the customer unless location and address are both unknown. Say how long ago it reported with last_report_ago (never a raw count of minutes).",
     "When you describe one vehicle, add one short line with its GPS device status from gps_device: battery %, GSM signal (x/4), satellites, whether it is connected to the vehicle power and whether the engine is blocked. Say \"no disponible\" for missing values; never invent them. If it is not connected to the vehicle power, point it out.",
     "When several vehicles match, ask which one. If the customer has only one vehicle, use it.",
     "To know which vehicles are in a city, state or country, use vehicles_in_place; give the total and name them (on voice, name at most 5 and say how many more).",
@@ -222,6 +223,25 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
     return { ...zoneInfo(zone), status: "awaiting_pin_confirmation" };
   };
   tools.delete_red_zone = async ({ zone_id }) => ((await deleteRedZone(user, String(zone_id))) ? { status: "deleted" } : { error: "Red zone not found" });
+  tools.send_location_whatsapp = async ({ device_id }) => {
+    const v = await find(Number(device_id));
+    if (!v) return { error: "Vehicle not found among the customer's vehicles" };
+    const links = await prisma.waLink.findMany({ where: { gpswoxUserId: user.userId } });
+    if (!links.length) return { error: "This account has no WhatsApp linked. Tell the customer to write to their tracking company's WhatsApp number once to link it, then ask again." };
+    const place = await reverseGeocode(v.lat, v.lng, lang);
+    const where = place ? [place.street, place.neighbourhood, place.city, place.state].filter(Boolean).join(", ") : v.address ?? `${v.lat}, ${v.lng}`;
+    const near = place?.near ? `${t(lang, "Cerca de", "Near")}: ${[place.nearKind, place.near].filter(Boolean).join(" ")}${place.nearStreet ? ` (${place.nearStreet})` : ""}, ${place.nearMeters} m` : "";
+    const ago = timeAgo(minutesAgo(v.timestamp), lang);
+    const text = [`*${v.name}${v.plate ? ` (${v.plate})` : ""}*`, `${t(lang, "Ubicación", "Location")}: ${where}`, near, `${t(lang, "Velocidad", "Speed")}: ${v.speed} ${v.speedUnit}`, ago ? `${t(lang, "Último reporte", "Last report")}: ${t(lang, "hace", "")} ${ago}${t(lang, "", " ago")}`.replace(/\s+/g, " ") : "", gps.mapUrl(v.lat, v.lng)].filter(Boolean).join("\n");
+    const { DIRECT_WA, queueWa } = await import("../wa");
+    const { sendWhatsApp } = await import("../notify");
+    let sent = 0;
+    for (const l of links) {
+      const ok = l.companyId === DIRECT_WA ? (await sendWhatsApp(l.phone, text).catch(() => ({ ok: false }))).ok : await queueWa(l.companyId, l.phone, text).catch(() => false);
+      if (ok) sent++;
+    }
+    return sent ? { status: "sent", to: `${sent} WhatsApp` } : { error: "The WhatsApp message could not be sent now (WhatsApp not connected). Tell the customer to try later." };
+  };
   const VOICE_BLOCKED = ["request_engine_command", "activate_red_zone"];
   if (voice) for (const name of VOICE_BLOCKED) delete tools[name];
   const messages: Msg[] = [{ role: "system", content: systemPrompt(config.name, config.companyName, lang, input.deviceId, channel) }, ...past, { role: "user", content: input.message }];

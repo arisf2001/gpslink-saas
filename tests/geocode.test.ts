@@ -47,3 +47,15 @@ test("insidePlace handles polygons, holes and multipolygons", async () => {
   assert.equal(insidePlace(18.47, -69.93, multi), true);
   assert.equal(insidePlace(0, 0, multi), false);
 });
+
+test("placeFrom names the kind and street of the nearby place", async () => {
+  const { placeFrom, placeKind } = await import("../lib/ai/geocode");
+  const addr = { address: { road: "Avenida Duarte", city: "Santo Domingo", state: "Distrito Nacional" } };
+  const poi = { name: "Shell", category: "amenity", type: "fuel", lat: "18.4800", lon: "-69.9000", address: { road: "Avenida Duarte" } };
+  const p = placeFrom(addr, poi, 18.4801, -69.9001, "es");
+  assert.equal(p?.nearKind, "estación de combustible");
+  assert.equal(p?.nearStreet, "Avenida Duarte");
+  assert.equal(placeKind("leisure", "park", "en"), "park");
+  assert.equal(placeKind("shop", "unknown_shop", "es"), "tienda");
+  assert.equal(placeKind("building", "house", "es"), null);
+});
