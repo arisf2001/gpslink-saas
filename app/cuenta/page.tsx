@@ -2,7 +2,7 @@ import { prisma } from "@/lib/db";
 import { applyCheckoutSession } from "@/lib/checkout";
 import { BRAND } from "@/lib/config";
 import { METHOD_LABELS, STATUS_LABELS, formatDate, formatMoney } from "@/lib/format";
-import { resellerLoginUrl } from "@/lib/gpswox";
+import { companyPlatformOrigin } from "@/lib/brand-web";
 import { daysUntil } from "@/lib/lifecycle";
 import { getSession } from "@/lib/session";
 import { getStripe } from "@/lib/stripe";
@@ -89,7 +89,7 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
               </>
             )}
             <dt>Código de empresa</dt><dd><b>{company.slug}</b></dd>
-            <dt>Tu plataforma</dt><dd><a href={resellerLoginUrl()} target="_blank" rel="noreferrer" style={{ color: "var(--p)", fontWeight: 700 }}>{resellerLoginUrl()}</a><div className="hint">Entra con tu correo ({company.email}) y tu contraseña{company.billingEnabled ? "" : " de la plataforma"}. Ahí pones tu logo y colores, y creas tus clientes.</div></dd>
+            <dt>Tu plataforma</dt><dd><a href={`${companyPlatformOrigin(company)}/login`} target="_blank" rel="noreferrer" style={{ color: "var(--p)", fontWeight: 700 }}>{companyPlatformOrigin(company)}</a><div className="hint">Entra con tu correo ({company.email}) y tu contraseña{company.billingEnabled ? "" : " de la plataforma"}. Ahí pones tu logo y colores, y creas tus clientes.</div></dd>
           </dl>
         </div>
 

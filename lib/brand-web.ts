@@ -54,8 +54,13 @@ async function brandFor(gpswoxUserId: number) {
 // Platform origin a user should be sent to after logging in: its white label's subdomain, or track.
 export async function platformOriginFor(gpswoxUserId: number): Promise<string> {
   const brand = await brandFor(gpswoxUserId);
-  if (brand?.company?.customDomain) return `https://${brand.company.customDomain}`;
-  return brand?.company?.subdomain ? brandOrigin(brand.company.subdomain) : trackerUrl();
+  return brand?.company ? companyPlatformOrigin(brand.company) : trackerUrl();
+}
+
+// A white label's own tracking platform: its custom domain, its subdomain, or track as a last resort.
+export function companyPlatformOrigin(company: { customDomain: string | null; subdomain: string | null }): string {
+  if (company.customDomain) return `https://${company.customDomain}`;
+  return company.subdomain ? brandOrigin(company.subdomain) : trackerUrl();
 }
 
 // Where a GPSWOX user lands after logging out: its white label's website, its subdomain, its branded login, or gpslinkusa.com.

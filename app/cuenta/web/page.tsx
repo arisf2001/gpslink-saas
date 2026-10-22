@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireTab } from "@/lib/tabs";
-import { brandOrigin, brandRootDomain, loginSnippet } from "@/lib/brand-web";
-import { trackerUrl } from "@/lib/config";
+import { brandRootDomain, companyPlatformOrigin, loginSnippet } from "@/lib/brand-web";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { SiteNav } from "../../site-nav";
@@ -26,7 +25,7 @@ export default async function MiWebPage({ searchParams }: { searchParams: Promis
   if (!companyId) redirect("/cuenta");
   const company = await prisma.company.findUnique({ where: { id: companyId } });
   if (!company) redirect("/cuenta");
-  const platform = company.subdomain ? brandOrigin(company.subdomain) : trackerUrl();
+  const platform = companyPlatformOrigin(company);
   const snippet = loginSnippet(company.slug, company.brandColor ?? "#0F4C5C", platform);
 
   return (
@@ -48,7 +47,7 @@ export default async function MiWebPage({ searchParams }: { searchParams: Promis
           <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 6 }}>Tu plataforma con tu nombre</h2>
           <p className="hint" style={{ marginBottom: 12 }}>Tus clientes entran a tu plataforma de rastreo en esta dirección, ven tu marca y se quedan ahí. Cuando tengas tu propio dominio, pídenos conectarlo.</p>
           <SubdomainForm current={company.subdomain ?? ""} root={brandRootDomain()} />
-          {company.subdomain && <p style={{ marginTop: 10 }}>Tu plataforma: <a href={`${platform}/login`} target="_blank" rel="noreferrer" style={{ color: "var(--p)", fontWeight: 700 }}>{platform}</a></p>}
+          {(company.subdomain || company.customDomain) && <p style={{ marginTop: 10 }}>Tu plataforma: <a href={`${platform}/login`} target="_blank" rel="noreferrer" style={{ color: "var(--p)", fontWeight: 700 }}>{platform}</a></p>}
         </div>
         <div className="panel" style={{ marginTop: 18 }}>
           <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 6 }}>Tu web</h2>
