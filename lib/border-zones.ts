@@ -93,7 +93,7 @@ export function nextZoneState(prev: ZoneState | null, zone: Zone | null, speed: 
   return { state: { zone, cutState }, notice, cut };
 }
 
-type Position = { deviceId: number; name: string; plate: string | null; lat: number; lng: number; speed: number };
+type Position = { deviceId: number; name: string; plate: string | null; lat: number; lng: number; speed: number; cut?: boolean };
 
 async function positions(): Promise<Position[]> {
   if (isMock()) {
@@ -102,12 +102,13 @@ async function positions(): Promise<Position[]> {
   }
   return withGpswoxDb(async (conn) => {
     const [rows] = await conn.query<RowDataPacket[]>(
-      `SELECT d.id, d.name, d.plate_number, t.lastValidLatitude AS lat, t.lastValidLongitude AS lng, t.speed
+      `SELECT d.id, d.name, d.plate_number, t.lastValidLatitude AS lat, t.lastValidLongitude AS lng, t.speed, COALESCE(z.cut, 1) AS cut
          FROM devices d JOIN traccar_devices t ON t.id = d.traccar_device_id
-        WHERE d.deleted = 0 AND t.server_time > UTC_TIMESTAMP() - INTERVAL 1 DAY
+         LEFT JOIN gpslink_zone_devices z ON z.device_id = d.id
+        WHERE d.deleted = 0 AND t.server_time > UTC_TIMESTAMP() - INTERVAL 1 DAY AND COALESCE(z.alerts, 1) = 1
           AND t.lastValidLatitude BETWEEN 16 AND 21.5 AND t.lastValidLongitude BETWEEN -75.5 AND -67.5`,
     );
-    return rows.map((r) => ({ deviceId: Number(r.id), name: String(r.name || `Equipo ${r.id}`), plate: r.plate_number ? String(r.plate_number) : null, lat: Number(r.lat), lng: Number(r.lng), speed: Number(r.speed ?? 0) }));
+    return rows.map((r) => ({ deviceId: Number(r.id), name: String(r.name || `Equipo ${r.id}`), plate: r.plate_number ? String(r.plate_number) : null, lat: Number(r.lat), lng: Number(r.lng), speed: Number(r.speed ?? 0), cut: Number(r.cut) !== 0 }));
   });
 }
 
@@ -144,7 +145,7 @@ export async function runBorderZones(): Promise<{ checked: number; notices: numb
     summary.checked++;
     const { zone, km } = zoneAt(p.lat, p.lng);
     const prev = saved.get(p.deviceId);
-    const next = nextZoneState(prev ? { zone: prev.zone as Zone | null, cutState: prev.cutState as CutState } : null, zone, p.speed, setting.zoneCut);
+    const next = nextZoneState(prev ? { zone: prev.zone as Zone | null, cutState: prev.cutState as CutState } : null, zone, p.speed, setting.zoneCut && p.cut !== false);
     if (!prev && !zone) continue;
     if (next.notice || next.cut || next.state.zone !== (prev?.zone ?? null) || next.state.cutState !== (prev?.cutState ?? null)) work.push({ p, km, ...next });
   }
