@@ -3,7 +3,7 @@ import { prisma } from "../db";
 import { isMock, withGpswoxDb } from "../gpswox";
 import { carrierFor, ensureCarriers, statusLabel } from "./carriers";
 import { currentPackage, newsimCards, newsimConfigured, newsimLogin, newsimPackages, newsimStatus, packageEs } from "./newsim";
-import { onceConfigured, onceImei, onceQuota, onceSims, onceStatus, onceToken } from "./once";
+import { onceConfigured, onceImei, onceLastUse, onceQuota, onceSims, onceStatus, onceToken } from "./once";
 import { cardExpiry, cardPackage, telebayCards, telebayConfigured, telebayDate, type TelebayCard } from "./telebay";
 
 // Providers without Telebay's package list pass the plan name and expiry already computed.
@@ -90,15 +90,16 @@ export async function applyCards(cards: SyncCard[], carrierCode: string, owners:
         ? { deviceId: owner.deviceId, deviceName: owner.deviceName, ownerUserId: owner.userId, ownerEmail: owner.email, ownerPhone: owner.phone, linkSource: "auto" }
         : {}),
     };
+    const usage = carrierCode === "telebay" && (old ? data.usedMb !== old.usedMb : data.usedMb > 0) ? { lastUsageAt: now } : {};
     if (!old) {
-      await prisma.simCard.create({ data: { iccid, ...data } });
+      await prisma.simCard.create({ data: { iccid, ...data, ...usage } });
       await recordEvent(iccid, "new", `SIM nueva: ${statusLabel(data.status)}${owner ? ` · equipo ${owner.deviceName}` : ""}`);
       if (data.status === 2) await recordEvent(iccid, "activated", "SIM activa");
       summary.created++;
       if (owner) summary.linked++;
       continue;
     }
-    await prisma.simCard.update({ where: { iccid }, data });
+    await prisma.simCard.update({ where: { iccid }, data: { ...data, ...usage } });
     const changes: [string, string][] = [];
     if (old.status !== data.status) changes.push([data.status === 2 && old.status === 1 ? "activated" : "status", `Estado: ${statusLabel(old.status)} → ${statusLabel(data.status)}`]);
     if ((old.expiresAt?.getTime() ?? 0) !== (data.expiresAt?.getTime() ?? 0)) changes.push(["expiry", `Vencimiento: ${fmt(old.expiresAt)} → ${fmt(data.expiresAt)}`]);
@@ -211,9 +212,12 @@ export async function refreshOnceQuota() {
   let n = 0;
   for (const c of cards) {
     const q = await onceQuota(token, c.iccid).catch(() => null);
+    const used = await onceLastUse(token, c.iccid).catch(() => null);
     const total = Number(q?.total_volume) || 0;
-    if (!q || !total || q.volume == null) continue;
-    await prisma.simCard.update({ where: { iccid: c.iccid }, data: { totalMb: total, usedMb: Math.max(0, total - Number(q.volume)), packageName: `${total} MB` } });
+    const quota = q && total && q.volume != null ? { totalMb: total, usedMb: Math.max(0, total - Number(q.volume)), packageName: `${total} MB` } : {};
+    const usage = used && (!c.lastUsageAt || used > c.lastUsageAt) ? { lastUsageAt: used } : {};
+    if (!Object.keys(quota).length && !Object.keys(usage).length) continue;
+    await prisma.simCard.update({ where: { iccid: c.iccid }, data: { ...quota, ...usage } });
     n++;
   }
   return n;

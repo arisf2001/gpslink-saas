@@ -4,8 +4,8 @@ import type { SimCard } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { formatDate, formatMoney } from "@/lib/format";
 import { getSession } from "@/lib/session";
-import { countryEs, daysLeft, ensureCarriers, SIM_STATUS, statusLabel } from "@/lib/sim/carriers";
-import { dailyReportData, lastProviderSync, MONTHLY_PROVIDERS, NEWSIM_EVERY_DAYS, NOTICE_DAYS, REACTIVATION_NOTE } from "@/lib/sim/notify";
+import { countryEs, daysLeft, ensureCarriers, SIM_STATUS, statusLabel, SWAP_DAYS } from "@/lib/sim/carriers";
+import { dailyReportData, lastProviderSync, MONTHLY_PROVIDERS, NEWSIM_EVERY_DAYS, NOTICE_DAYS, REACTIVATION_NOTE, swapSuspects } from "@/lib/sim/notify";
 import { telebayConfigured } from "@/lib/sim/telebay";
 import { simMismatches } from "@/lib/sim/sync";
 import { AdminShell } from "../admin-shell";
@@ -129,6 +129,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
     await Promise.all(MONTHLY_PROVIDERS.filter((p) => all.some((c) => c.carrierCode === p.code)).map(async (p) => ({ name: p.name, last: await lastProviderSync(p.code) })))
   ).filter((m) => m.last);
   const mismatches = await simMismatches().catch(() => []);
+  const swaps = await swapSuspects(now).catch(() => []);
   const pending = await prisma.simRenewal.findMany({ where: { status: "PAID" }, orderBy: { paidAt: "asc" } });
   const agencies = new Map((await prisma.company.findMany({ select: { id: true, name: true } })).map((c) => [c.id, c.name]));
   const lastSync = all.reduce<Date | null>((m, c) => (!m || c.lastSyncAt > m ? c.lastSyncAt : m), null);
@@ -164,7 +165,7 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
       <div className="tabs" style={{ margin: "14px 0 10px" }}>
         {TABS.map(([k, label]) => (
           <Link key={k} href={`/admin/sim?f=${k}`} className={`tab${f === k ? " on" : ""}`}>
-            {label}{k === "vencer" ? ` (${report.soon.length + report.expired.length})` : k === "pagadas" ? ` (${pending.length})` : k === "sin-equipo" ? ` (${report.noDevice.length})` : k === "revisar" ? ` (${mismatches.length})` : ""}
+            {label}{k === "vencer" ? ` (${report.soon.length + report.expired.length})` : k === "pagadas" ? ` (${pending.length})` : k === "sin-equipo" ? ` (${report.noDevice.length})` : k === "revisar" ? ` (${mismatches.length + swaps.length})` : ""}
           </Link>
         ))}
       </div>
@@ -262,6 +263,22 @@ export default async function SimPage({ searchParams }: { searchParams: Promise<
                   <td>{m.linkedName ?? <span className="hint">Sin equipo</span>}</td>
                   <td>{m.actualName ?? <span className="hint">Un equipo que no está en GPS Link</span>}<div className="hint">IMEI {m.imei}</div></td>
                   <td>{m.actualId ? <form action={fixMismatchAction}><input type="hidden" name="iccid" value={m.iccid} /><button className="btn sm">Actualizar</button></form> : <span className="hint">Créalo en GPS Link</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <h2 style={{ fontSize: 17, margin: "18px 0 6px" }}>Posible cambio de SIM</h2>
+          <p className="hint" style={{ marginBottom: 10 }}>El equipo sigue reportando en GPS Link, pero su SIM no gasta datos desde hace más de {SWAP_DAYS} días (Telebay y 1NCE). Es probable que tenga otra SIM puesta.</p>
+          <table className="t">
+            <thead><tr><th>ICCID</th><th>Equipo</th><th>Último uso de datos</th><th>Último reporte</th></tr></thead>
+            <tbody>
+              {swaps.length === 0 && <tr><td colSpan={4} className="hint">Ningún equipo con posible cambio de SIM.</td></tr>}
+              {swaps.map(({ card, lastReport }) => (
+                <tr key={card.iccid}>
+                  <td><Link href={`/admin/sim/${card.iccid}?back=${encodeURIComponent(back)}`}>{card.iccid}</Link></td>
+                  <td>{card.deviceName ?? "—"}</td>
+                  <td>{card.lastUsageAt ? formatDate(card.lastUsageAt) : "—"}</td>
+                  <td>{lastReport ? when(lastReport) : "—"}</td>
                 </tr>
               ))}
             </tbody>

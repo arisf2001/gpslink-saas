@@ -87,3 +87,11 @@ export function countryEs(name: string | null | undefined): string {
   if (!name) return "";
   return COUNTRY_ES[name.trim()] ?? name;
 }
+
+export const SWAP_DAYS = 3;
+
+// The device keeps reporting (last 24 h) but its SIM has had no data traffic for SWAP_DAYS: it is likely using another SIM.
+export function possibleSwap(lastUsageAt: Date | null, lastReport: Date | null, now: Date): boolean {
+  if (!lastUsageAt || !lastReport) return false;
+  return now.getTime() - lastReport.getTime() < DAY && lastReport.getTime() - lastUsageAt.getTime() > SWAP_DAYS * DAY;
+}

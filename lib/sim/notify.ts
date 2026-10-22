@@ -5,7 +5,8 @@ import { prisma } from "../db";
 import { BRAND, appUrl } from "../config";
 import { formatDate, formatMoney } from "../format";
 import { emailHtml, sendEmail, type ChannelResult } from "../notify";
-import { daysLeft, DAY, MONTHLY_CARRIERS, NEWSIM, ONCE, statusLabel } from "./carriers";
+import { daysLeft, DAY, MONTHLY_CARRIERS, NEWSIM, ONCE, possibleSwap, statusLabel, SWAP_DAYS } from "./carriers";
+import { lastSignals } from "../gpswox";
 import { fillDeviceProfiles, refreshOnceQuota, syncNewsim, syncOnce, syncSims } from "./sync";
 import { notify } from "../notifications";
 
@@ -256,6 +257,34 @@ export async function runLowDataNotices() {
   return fresh.length;
 }
 
+export async function swapSuspects(now = new Date()) {
+  const cards = await prisma.simCard.findMany({ where: { carrierCode: { in: ["telebay", ONCE] }, goneAt: null, deviceId: { not: null }, lastUsageAt: { not: null } } });
+  if (!cards.length) return [];
+  const signals = await lastSignals(cards.map((c) => c.deviceId!));
+  return cards.map((c) => ({ card: c, lastReport: signals.get(c.deviceId!) ?? null })).filter((x) => possibleSwap(x.card.lastUsageAt, x.lastReport, now));
+}
+
+// Owner alert, once per SIM and last-usage day.
+export async function runSwapNotices(now = new Date()) {
+  const fresh: Awaited<ReturnType<typeof swapSuspects>> = [];
+  for (const x of await swapSuspects(now)) {
+    try {
+      await prisma.simNotice.create({ data: { iccid: x.card.iccid, kind: "swap", dedupeKey: `${x.card.iccid}:${dayKey(x.card.lastUsageAt!)}:swap` } });
+      fresh.push(x);
+    } catch {}
+  }
+  if (!fresh.length) return 0;
+  await sendEmail(
+    reportTo(),
+    `${fresh.length} equipo(s) con posible cambio de SIM`,
+    emailHtml("Posible cambio de SIM", [
+      `Estos equipos siguen reportando, pero su SIM no gasta datos desde hace más de ${SWAP_DAYS} días. Es probable que les hayan puesto otra SIM:`,
+      ...fresh.map((x) => `• ${x.card.deviceName ?? "Equipo"} · SIM ${x.card.iccid} · último uso de datos ${formatDate(x.card.lastUsageAt!)} · reportó ${formatDate(x.lastReport!)}`),
+    ], { label: "Abrir Tarjetas SIM", url: `${appUrl()}/admin/sim?f=revisar` }),
+  );
+  return fresh.length;
+}
+
 async function onceQuotaDaily(now: Date) {
   try {
     await prisma.simNotice.create({ data: { iccid: ONCE, kind: "quota", dedupeKey: `${ONCE}-quota:${dayKey(now)}` } });
@@ -271,7 +300,7 @@ export async function runSims(now = new Date()) {
   const esim = Object.keys(monthly.results).length ? monthly.results : null;
   await onceQuotaDaily(now);
   const profiles = await fillDeviceProfiles().catch((e) => (console.error("[sim] device profiles:", (e as Error).message), 0));
-  const notices = (await runSimNotices(now)) + (await runEsimDueNotices(now)) + (await runLowDataNotices());
+  const notices = (await runSimNotices(now)) + (await runEsimDueNotices(now)) + (await runLowDataNotices()) + (await runSwapNotices(now));
   const report = synced ? await sendDailyReport(now) : false;
   return { synced, esim, profiles, notices, report };
 }

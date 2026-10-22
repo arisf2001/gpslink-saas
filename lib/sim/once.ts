@@ -61,3 +61,21 @@ const luhn = (body: string) => {
 
 // The API reports IMEISV (16 digits): the IMEI is its first 14 digits plus the Luhn check digit.
 export const onceImei = (imei: string | null) => (imei && /^\d{16}$/.test(imei) ? imei.slice(0, 14) + luhn(imei.slice(0, 14)) : imei);
+
+type UsageDay = { date: string; data?: { volume?: string } };
+
+// Last day (end of day, UTC) with data traffic in the last 30 days, from the daily usage stats.
+export async function onceLastUse(token: string, iccid: string, now = new Date()): Promise<Date | null> {
+  const day = (d: Date) => d.toISOString().slice(0, 10);
+  const res = await fetch(`${BASE}/v1/sims/${iccid}/usage?start_dt=${day(new Date(now.getTime() - 30 * 86_400_000))}&end_dt=${day(now)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(25_000),
+  });
+  if (!res.ok) throw new Error(`1NCE usage: ${res.status}`);
+  return lastUseDay(((await res.json()) as { stats?: UsageDay[] }).stats ?? []);
+}
+
+export function lastUseDay(stats: UsageDay[]): Date | null {
+  const days = stats.filter((d) => Number(d.data?.volume) > 0).map((d) => d.date.slice(0, 10)).sort();
+  return days.length ? new Date(`${days[days.length - 1]}T23:59:59Z`) : null;
+}
