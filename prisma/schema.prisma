@@ -62,6 +62,9 @@ model Company {
   billingEnabled       Boolean        @default(true)
   provisionError       String?        @db.Text
   stripeCustomerId     String?
+  cardPaymentMethodId  String?
+  cardBrand            String?
+  cardLast4            String?
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
   invoices             Invoice[]
@@ -586,4 +589,10 @@ model DeviceActivation {
 
   @@index([status])
   @@index([imei])
+}
+
+// Public site settings (gpslinkusa.com): Spanish shows prices in RD$ at this rate.
+model SiteSetting {
+  id      Int   @id @default(1)
+  dopRate Float @default(60)
 }

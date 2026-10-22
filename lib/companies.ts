@@ -10,6 +10,7 @@ import { login as platformLogin, userInfo } from "./ai/gps";
 import { runClientLifecycle } from "./clients";
 import { plusOneYear, reminderDayFor } from "./lifecycle";
 import { emailHtml, sendEmail, sendWhatsApp, type ChannelResult } from "./notify";
+import { getStripe } from "./stripe";
 
 export type CompanyWithPlan = Company & { plan: Plan };
 
@@ -198,20 +199,55 @@ export async function createInvoice(company: Company, now = new Date()) {
     for (const d of items) await tx.billedDevice.update({ where: { id: d.id }, data: { nextBillAt: plusOneYear(d.nextBillAt) } });
     return created;
   });
+  const charged = company.cardPaymentMethodId ? await chargeSavedCard(invoice.id, { notify: false }) : null;
+  const card = `${(company.cardBrand ?? "tarjeta").replace(/^./, (c) => c.toUpperCase())} •••• ${company.cardLast4 ?? ""}`;
   await notifyOnce(company, "invoice", `${invoice.id}:invoice`, {
     subject: `Tu factura de GPS Link: ${formatMoney(invoice.amountCents, invoice.currency)}`,
     title: "Tu factura del mes está lista",
     lines: [
       ...(invoice.devices ? [`${invoice.devices} ${invoice.devices === 1 ? "equipo" : "equipos"} (${newDevices} nuevos, ${renewals} renovaciones) a ${formatMoney(unit, invoice.currency)} por año cada uno.`] : []),
       ...(aiCents ? [`Asistente IA del mes: ${formatMoney(aiCents, invoice.currency)}.`] : []),
-      `Total: ${formatMoney(invoice.amountCents, invoice.currency)}. Puedes pagar hasta el ${formatDate(new Date(invoice.dueAt.getTime() - DAY_MS))}.`,
+      charged?.ok
+        ? `Total: ${formatMoney(invoice.amountCents, invoice.currency)}. Ya la cobramos a tu ${card}. Gracias.`
+        : `Total: ${formatMoney(invoice.amountCents, invoice.currency)}. Puedes pagar hasta el ${formatDate(new Date(invoice.dueAt.getTime() - DAY_MS))}.`,
+      ...(charged && !charged.ok ? [`No pudimos cobrarla a tu ${card}: ${charged.error}. Págala desde tu cuenta o cambia la tarjeta.`] : []),
     ],
-    cta: { label: "Pagar mi factura", url: `${appUrl()}/cuenta` },
+    cta: charged?.ok ? { label: "Ver mi cuenta", url: `${appUrl()}/cuenta` } : { label: "Pagar mi factura", url: `${appUrl()}/cuenta` },
   });
   return invoice;
 }
 
-export async function markInvoicePaid(invoiceId: string, payment: { method: string; reference?: string; note?: string }, now = new Date()) {
+// Charges an open invoice to the company's saved card (off-session); never throws.
+export async function chargeSavedCard(invoiceId: string, opts: { notify?: boolean } = {}): Promise<{ ok: true } | { ok: false; error: string } | null> {
+  const stripe = getStripe();
+  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId }, include: { company: true } });
+  const company = invoice?.company;
+  if (!stripe || !invoice || !company?.cardPaymentMethodId || !company.stripeCustomerId || invoice.status !== "OPEN" || invoice.amountCents <= 0) return null;
+  try {
+    const pi = await stripe.paymentIntents.create(
+      {
+        amount: invoice.amountCents,
+        currency: invoice.currency,
+        customer: company.stripeCustomerId,
+        payment_method: company.cardPaymentMethodId,
+        off_session: true,
+        confirm: true,
+        description: `GPS Link · Factura de ${invoice.devices} equipos`,
+        metadata: { kind: "company_invoice", companyId: company.id, invoiceId: invoice.id },
+      },
+      { idempotencyKey: `invoice-${invoice.id}-${company.cardPaymentMethodId}-${Math.floor(Date.now() / 600_000)}` },
+    );
+    if (pi.status !== "succeeded") return { ok: false, error: "el banco pidió confirmación" };
+    await markInvoicePaid(invoice.id, { method: "stripe", reference: pi.id }, new Date(), opts);
+    return { ok: true };
+  } catch (e) {
+    const msg = (e as { raw?: { message?: string }; message?: string }).raw?.message ?? (e as Error).message;
+    console.error(`[factura] cobro con tarjeta ${invoice.id}:`, msg);
+    return { ok: false, error: msg || "la tarjeta fue rechazada" };
+  }
+}
+
+export async function markInvoicePaid(invoiceId: string, payment: { method: string; reference?: string; note?: string }, now = new Date(), opts: { notify?: boolean } = {}) {
   if (payment.reference && (await prisma.invoice.findUnique({ where: { reference: payment.reference } }))) return null;
   const invoice = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { company: true } });
   if (invoice.status === "PAID") return invoice;
@@ -221,7 +257,7 @@ export async function markInvoicePaid(invoiceId: string, payment: { method: stri
     if (company.gpswoxUserId) await setResellerActive(company.email, true);
     await prisma.company.update({ where: { id: company.id }, data: { status: "ACTIVE" } });
   }
-  await notifyOnce(company, "paid", `${invoiceId}:paid`, {
+  if (opts.notify !== false) await notifyOnce(company, "paid", `${invoiceId}:paid`, {
     subject: "Pago recibido: GPS Link",
     title: "¡Gracias! Recibimos tu pago",
     lines: [`Factura de ${formatMoney(invoice.amountCents, invoice.currency)} pagada.`],

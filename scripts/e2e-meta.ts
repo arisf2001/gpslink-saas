@@ -22,7 +22,7 @@ async function main() {
     const body = (id: string, text: string) => JSON.stringify({ entry: [{ changes: [{ value: { messages: [{ from: phone, id, type: "text", text: { body: text } }] } }] }] });
     const post = (raw: string, sig: string) => fetch(`${base}/api/meta/webhook`, { method: "POST", headers: { "Content-Type": "application/json", "X-Hub-Signature-256": sig }, body: raw });
     const sign = (raw: string) => `sha256=${createHmac("sha256", secret).update(raw).digest("hex")}`;
-    let raw = body(`wamid.${phone}.1`, "hola");
+    const raw = body(`wamid.${phone}.1`, "hola");
     assert.equal((await post(raw, "sha256=00")).status, 403, "firma falsa");
     assert.equal((await post(raw, sign(raw))).status, 200);
     assert.equal((await post(raw, sign(raw))).status, 200, "reintento de Meta");

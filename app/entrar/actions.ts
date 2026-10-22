@@ -1,5 +1,6 @@
 "use server";
 
+import { localize } from "@/lib/i18n-errors";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { rateLimit, resolveUser } from "@/lib/ai/assistant";
@@ -9,7 +10,7 @@ import { platformOriginFor } from "@/lib/brand-web";
 
 export type TrackLoginState = { error?: string; email?: string };
 
-export async function trackLoginAction(_prev: TrackLoginState, formData: FormData): Promise<TrackLoginState> {
+async function trackLoginActionEs(_prev: TrackLoginState, formData: FormData): Promise<TrackLoginState> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
   if (!email || !password) return { error: "Escribe tu correo y tu contraseña.", email };
@@ -20,4 +21,8 @@ export async function trackLoginAction(_prev: TrackLoginState, formData: FormDat
   const user = await resolveUser(hash).catch(() => null);
   if (!user?.userId) return { error: "No pudimos entrar ahora. Inténtalo otra vez.", email };
   redirect(`${await platformOriginFor(user.userId)}/gpslink-sso?t=${encodeURIComponent(trackSsoToken(user.userId))}`);
+}
+
+export async function trackLoginAction(prev: TrackLoginState, formData: FormData): Promise<TrackLoginState> {
+  return localize(await trackLoginActionEs(prev, formData));
 }

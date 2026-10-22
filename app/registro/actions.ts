@@ -1,5 +1,6 @@
 "use server";
 
+import { localize } from "@/lib/i18n-errors";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { rateLimit } from "@/lib/ai/assistant";
@@ -33,7 +34,7 @@ async function sendCode(email: string, code: string): Promise<boolean> {
   return sent.ok || process.env.NODE_ENV !== "production";
 }
 
-export async function registerAction(_prev: RegisterState, formData: FormData): Promise<RegisterState> {
+async function registerActionEs(_prev: RegisterState, formData: FormData): Promise<RegisterState> {
   const get = (k: string) => String(formData.get(k) ?? "").trim();
   const values = { name: get("name"), slug: get("slug"), contactName: get("contactName"), email: get("email").toLowerCase(), phone: get("phone"), planId: get("planId") };
   const password = String(formData.get("password") ?? "");
@@ -131,6 +132,14 @@ export async function resendAction(prev: RegisterState, formData: FormData): Pro
   return { ...back, info: "Te enviamos un código nuevo." };
 }
 
-export async function codeAction(prev: RegisterState, formData: FormData): Promise<RegisterState> {
+async function codeActionEs(prev: RegisterState, formData: FormData): Promise<RegisterState> {
   return formData.get("op") === "resend" ? resendAction(prev, formData) : verifyAction(prev, formData);
+}
+
+export async function registerAction(prev: RegisterState, formData: FormData): Promise<RegisterState> {
+  return localize(await registerActionEs(prev, formData));
+}
+
+export async function codeAction(prev: RegisterState, formData: FormData): Promise<RegisterState> {
+  return localize(await codeActionEs(prev, formData));
 }

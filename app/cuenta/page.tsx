@@ -7,13 +7,14 @@ import { daysUntil } from "@/lib/lifecycle";
 import { getSession } from "@/lib/session";
 import { getStripe } from "@/lib/stripe";
 import { SiteNav } from "../site-nav";
-import { logoutAction, payAction } from "./actions";
+import { logoutAction, payAction, removeCardAction, saveCardAction } from "./actions";
+import { cardLabel } from "@/lib/company-card";
 import { CuentaNav } from "./cuenta-nav";
 import { LoginForm } from "./login-form";
 
 export const dynamic = "force-dynamic";
 
-type Search = { bienvenido?: string; pago?: string; session_id?: string };
+type Search = { bienvenido?: string; pago?: string; session_id?: string; tarjeta?: string; motivo?: string };
 
 export default async function CuentaPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
@@ -41,6 +42,17 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
       paymentNotice = (await applyCheckoutSession(session)) ? "¡Pago recibido! Gracias." : "Estamos confirmando tu pago. Recarga en un minuto.";
     }
   }
+
+  if (params.tarjeta === "ok" && params.session_id) {
+    const stripe = getStripe();
+    const session = stripe ? await stripe.checkout.sessions.retrieve(params.session_id).catch(() => null) : null;
+    if (session?.metadata?.companyId === companyId) {
+      paymentNotice = (await applyCheckoutSession(session)) ? "Tarjeta guardada. Tus facturas se cobrarán solas a esta tarjeta." : "Estamos confirmando tu tarjeta. Recarga en un minuto.";
+    }
+  }
+  if (params.tarjeta === "quitada") paymentNotice = "Quitamos tu tarjeta. Tus facturas ya no se cobrarán solas.";
+  if (params.pago === "tarjeta") paymentNotice = "¡Pago recibido! Lo cobramos a tu tarjeta guardada.";
+  const payError = params.pago === "rechazada" ? `No pudimos cobrar a tu tarjeta${params.motivo ? `: ${params.motivo}` : ""}. Prueba con "Pagar con otra tarjeta" o cambia tu tarjeta.` : params.tarjeta === "no-disponible" ? "Los pagos con tarjeta no están disponibles ahora." : null;
 
   const company = await prisma.company.findUnique({ where: { id: companyId }, include: { invoices: { orderBy: { periodStart: "desc" } } } });
   if (!company) return <LoginForm />;
@@ -93,6 +105,27 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
           </dl>
         </div>
 
+        {stripeOn && (
+          <div className="panel" style={{ marginTop: 18 }}>
+            <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 10 }}>Método de pago</h2>
+            {payError && <div className="err" role="alert">{payError}</div>}
+            {company.cardPaymentMethodId ? (
+              <>
+                <p style={{ margin: "0 0 10px" }}>Tarjeta guardada: <b>{cardLabel(company)}</b>. Cada factura se cobra sola a esta tarjeta el día que sale, y te avisamos.</p>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <form action={saveCardAction}><button className="btn sm">Cambiar tarjeta</button></form>
+                  <form action={removeCardAction}><button className="btn sm s">Quitar tarjeta</button></form>
+                </div>
+              </>
+            ) : (
+              <>
+                <p style={{ margin: "0 0 10px" }}>Guarda tu tarjeta y tus facturas se cobran solas cada mes, sin que tengas que entrar a pagar. La tarjeta la guarda Stripe de forma segura; nosotros no vemos el número.</p>
+                <form action={saveCardAction}><button className="btn sm">Guardar tarjeta</button></form>
+              </>
+            )}
+          </div>
+        )}
+
         <div className="panel" style={{ marginTop: 18 }}>
           <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 10 }}>Facturas</h2>
           {company.invoices.length === 0 ? (
@@ -109,7 +142,10 @@ export default async function CuentaPage({ searchParams }: { searchParams: Promi
                     <td>{formatDate(new Date(i.dueAt.getTime() - 86_400_000))}</td>
                     <td>
                       {i.status === "PAID" ? `Pagada (${METHOD_LABELS[i.method ?? ""] ?? i.method})` : stripeOn ? (
-                        <form action={payAction}><input type="hidden" name="invoiceId" value={i.id} /><button className="btn sm">Pagar</button></form>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {company.cardPaymentMethodId && <form action={payAction}><input type="hidden" name="invoiceId" value={i.id} /><input type="hidden" name="useCard" value="1" /><button className="btn sm">Pagar con {cardLabel(company)}</button></form>}
+                          <form action={payAction}><input type="hidden" name="invoiceId" value={i.id} /><button className={company.cardPaymentMethodId ? "btn sm s" : "btn sm"}>{company.cardPaymentMethodId ? "Pagar con otra tarjeta" : "Pagar"}</button></form>
+                        </div>
                       ) : "Pendiente"}
                     </td>
                   </tr>

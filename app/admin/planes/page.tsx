@@ -8,6 +8,7 @@ import { getSession } from "@/lib/session";
 import { savePlanAction, saveTiersAction } from "../actions";
 import { saveActivationPricesAction } from "../activacion/actions";
 import { AdminShell } from "../admin-shell";
+import { dopRate } from "@/lib/lang";
 import { saveCarrierAction } from "../sim/actions";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,7 @@ export default async function PlanesPage({ searchParams }: { searchParams: Promi
   await ensureDefaultPlans();
   const plans = await prisma.plan.findMany({ orderBy: [{ sortOrder: "asc" }, { devices: "asc" }] });
   const tiers = await prisma.priceTier.findMany({ orderBy: { minDevices: "asc" } });
+  const rate = await dopRate();
   const [act, carriers, simCounts] = await Promise.all([
     activationSetting(),
     ensureCarriers(),
@@ -28,6 +30,7 @@ export default async function PlanesPage({ searchParams }: { searchParams: Promi
     activacion: "Precio de activación no válido. Usa solo números, por ejemplo 10 o 9.50.",
     nada: "En activación escoge al menos una cosa para cobrar (plataforma o SIM).",
     sim: "Precio de SIM no válido, o falta el comienzo del ICCID.",
+    tasa: "Tasa del dólar no válida. Escribe cuántos pesos vale 1 dólar, por ejemplo 60.",
   };
 
   return (
@@ -46,6 +49,9 @@ export default async function PlanesPage({ searchParams }: { searchParams: Promi
               <input name={`price-${t.id}`} defaultValue={(t.priceCents / 100).toString()} inputMode="decimal" style={{ width: 110 }} />
             </label>
           ))}
+          <label style={{ fontSize: 13 }}>Tasa: 1 US$ = RD$
+            <input name="dopRate" defaultValue={String(rate)} inputMode="decimal" style={{ width: 90 }} />
+          </label>
           <button className="btn sm">{ok === "tramos" ? "Guardado ✓" : "Guardar precios"}</button>
         </form>
       </div>

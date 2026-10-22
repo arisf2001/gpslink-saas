@@ -110,3 +110,4 @@ table.t input{font:inherit;padding:6px 8px;border:1.5px solid #d1d5db;border-rad
 .btn.google{background:#fff;color:#1f2937;border:1.5px solid #d1d5db;display:flex;align-items:center;justify-content:center;gap:10px}
 .btn.google:hover{background:#f9fafb}
 .trackbox.compact .btn.google{grid-column:1/-1}
+.lang-sw{font-weight:800;font-size:13px;border:1.5px solid currentColor;border-radius:6px;padding:3px 7px;color:var(--p);text-decoration:none}

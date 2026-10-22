@@ -53,6 +53,9 @@ export async function saveTiersAction(formData: FormData) {
     if (cents === null) redirect("/admin/planes?error=precio");
     await prisma.priceTier.update({ where: { id: tier.id }, data: { priceCents: cents } });
   }
+  const rate = Number(String(formData.get("dopRate") ?? "").replace(",", "."));
+  if (!Number.isFinite(rate) || rate <= 0 || rate > 1000) redirect("/admin/planes?error=tasa");
+  await prisma.siteSetting.upsert({ where: { id: 1 }, create: { id: 1, dopRate: rate }, update: { dopRate: rate } });
   revalidatePath("/");
   redirect("/admin/planes?ok=tramos");
 }
