@@ -2,9 +2,11 @@
 
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { CURRENCIES, PERIOD_LABELS, blockClient, endOfDayDR, registerClientPayment, setClientPlan, syncClients, unblockClient } from "@/lib/clients";
+import { CURRENCIES, PERIOD_LABELS, SubDistributorError, blockClient, createSubDistributor, endOfDayDR, registerClientPayment, setClientPlan, syncClients, unblockClient } from "@/lib/clients";
 import { parseMoneyToCents } from "@/lib/format";
 import { getSession } from "@/lib/session";
+import { platformOriginFor } from "@/lib/brand-web";
+import { trackSsoToken } from "@/lib/track-sso";
 
 async function requireCompany() {
   const id = await getSession("company");
@@ -91,6 +93,30 @@ export async function unblockClientAction(formData: FormData) {
   const client = await ownClient(company.id, formData);
   if (!(await unblockClient(client))) redirect(`/cuenta/clientes/${client.id}?error=vencido`);
   redirect(`/cuenta/clientes/${client.id}?ok=desbloqueado`);
+}
+
+export async function createSubDistributorAction(formData: FormData) {
+  const company = await requireCompany();
+  let id: string;
+  try {
+    id = (await createSubDistributor(company, {
+      email: String(formData.get("email") ?? ""),
+      phone: String(formData.get("phone") ?? ""),
+      devicesLimit: Number(formData.get("devicesLimit")),
+    })).id;
+  } catch (e) {
+    if (e instanceof SubDistributorError) redirect(`/cuenta/clientes?error=sub-${e.message}`);
+    throw e;
+  }
+  redirect(`/cuenta/clientes/${id}?ok=sub`);
+}
+
+// Support: the white label opens the tracking platform as any client or sub-distributor below it.
+export async function enterClientPlatformAction(formData: FormData) {
+  const company = await requireCompany();
+  const client = await ownClient(company.id, formData);
+  if (client.goneAt) redirect(`/cuenta/clientes/${client.id}`);
+  redirect(`${await platformOriginFor(client.gpswoxUserId)}/gpslink-sso?t=${encodeURIComponent(trackSsoToken(client.gpswoxUserId))}`);
 }
 
 // Development only (GPSWOX_MODE=mock): fake GPS Link clients to try the panel.

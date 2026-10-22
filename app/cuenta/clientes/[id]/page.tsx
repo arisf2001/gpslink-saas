@@ -7,11 +7,11 @@ import { METHOD_LABELS, formatDate, formatMoney } from "@/lib/format";
 import { getSession } from "@/lib/session";
 import { SiteNav } from "../../../site-nav";
 import { CuentaNav } from "../../cuenta-nav";
-import { blockClientAction, clientPaymentAction, setClientPlanAction, unblockClientAction } from "../actions";
+import { blockClientAction, clientPaymentAction, enterClientPlatformAction, setClientPlanAction, unblockClientAction } from "../actions";
 
 export const dynamic = "force-dynamic";
 
-const OK: Record<string, string> = { plan: "Plan guardado.", pago: "Pago registrado. Le enviamos el recibo por correo.", bloqueado: "Cliente bloqueado.", desbloqueado: "Cliente desbloqueado." };
+const OK: Record<string, string> = { sub: "Subdistribuidor creado. Le enviamos su usuario y contraseña por correo.", plan: "Plan guardado.", pago: "Pago registrado. Le enviamos el recibo por correo.", bloqueado: "Cliente bloqueado.", desbloqueado: "Cliente desbloqueado." };
 const ERR: Record<string, string> = {
   plan: "Elige un plan y la fecha de vencimiento.",
   pago: "Revisa los datos del pago.",
@@ -48,7 +48,7 @@ export default async function ClientePage({ params, searchParams }: { params: Pr
 
         <div className="panel">
           <dl className="kv">
-            <dt>Tipo</dt><dd>{client.isDealer ? "Dealer (sus clientes también se bloquean si él se bloquea)" : "Cliente"}</dd>
+            <dt>Tipo</dt><dd>{client.isDealer ? "Subdistribuidor (sus clientes también se bloquean si él se bloquea)" : "Cliente"}</dd>
             <dt>Equipos</dt><dd>{client.devices}</dd>
             <dt>Teléfono</dt><dd>{client.phone ?? "—"}</dd>
             <dt>Plan</dt><dd>{client.plan ? `${client.plan.name} · ${formatMoney(client.plan.priceCents, client.plan.currency)} por equipo · ${PERIOD_LABELS[client.plan.months] ?? `${client.plan.months} meses`}` : "Sin plan (no vence)"}</dd>
@@ -56,6 +56,12 @@ export default async function ClientePage({ params, searchParams }: { params: Pr
             {client.blockReason && <><dt>Bloqueado</dt><dd>{BLOCK_REASONS[client.blockReason] ?? client.blockReason}</dd></>}
             {client.goneAt && <><dt>Eliminado</dt><dd>Ya no está en tu plataforma de rastreo (desde el {formatDate(client.goneAt)})</dd></>}
           </dl>
+          {!client.goneAt && (
+            <form action={enterClientPlatformAction} style={{ marginTop: 10 }}>
+              <input type="hidden" name="clientId" value={client.id} />
+              <button className="btn sm s">Entrar a su plataforma (soporte)</button>
+            </form>
+          )}
         </div>
 
         <div className="grid" style={{ marginTop: 18 }}>

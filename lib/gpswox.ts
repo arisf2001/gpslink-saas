@@ -11,6 +11,7 @@ export type ResellerInput = {
   devicesLimit: number;
   expiresAt: Date;
   phone?: string;
+  managerId?: number;
 };
 
 let cachedHash: string | null = null;
@@ -81,7 +82,10 @@ async function call(method: "GET" | "POST" | "PUT", path: string, body: Record<s
 let mockSeq = Math.floor(Date.now() / 1000);
 
 export async function createReseller(input: ResellerInput): Promise<number> {
-  if (isMock()) return ++mockSeq;
+  if (isMock()) {
+    if (!input.managerId) return ++mockSeq;
+    return (await prisma.mockClient.create({ data: { managerId: input.managerId, email: input.email, phone: input.phone ?? null, groupId: 3 } })).id;
+  }
   const data = await call("POST", "client", {
     active: 1,
     email: input.email,
@@ -95,6 +99,7 @@ export async function createReseller(input: ResellerInput): Promise<number> {
     enable_expiration_date: 1,
     expiration_date: gpswoxDate(input.expiresAt),
     phone_number: input.phone,
+    ...(input.managerId ? { enable_manager_id: 1, manager_id: input.managerId } : {}),
   });
   const id = Number((data.item as { id?: number } | undefined)?.id);
   if (!id) throw new Error("GPSWOX no devolvió el id del revendedor");

@@ -7,10 +7,18 @@ import { formatDate } from "@/lib/format";
 import { getSession } from "@/lib/session";
 import { SiteNav } from "../../site-nav";
 import { CuentaNav } from "../cuenta-nav";
-import { mockClientAction, syncClientsAction } from "./actions";
+import { createSubDistributorAction, mockClientAction, syncClientsAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
+
+const SUB_ERRORS: Record<string, string> = {
+  correo: "Escribe un correo válido.",
+  "correo-usado": "Ese correo ya tiene una cuenta en la plataforma de rastreo.",
+  limite: "El máximo de equipos debe estar entre 1 y tu límite.",
+  "sin-usuario": "Tu cuenta todavía no tiene plataforma de rastreo.",
+  plataforma: "No pudimos crear el subdistribuidor en la plataforma de rastreo. Inténtalo en unos minutos.",
+};
 
 const FILTERS = { todos: "Todos", vencer: "Por vencer", bloqueados: "Bloqueados", "sin-plan": "Sin plan" } as const;
 
@@ -45,6 +53,7 @@ export default async function ClientesPage({ searchParams }: { searchParams: Pro
         <p className="hint" style={{ marginBottom: 12 }}>
           Aquí salen los clientes y dealers que creas en tu plataforma de rastreo. Ponle un plan y una fecha de vencimiento a cada uno: les avisamos por correo 3, 2 y 1 días antes, y si no pagan se bloquean solos. Cuando registras su pago, se reactivan. Los que no tienen plan nunca vencen.
         </p>
+        {error?.startsWith("sub-") && <div className="err" style={{ marginBottom: 12 }}>{SUB_ERRORS[error.slice(4)] ?? SUB_ERRORS.plataforma}</div>}
         {ok === "sync" && <div className="ok" style={{ marginBottom: 12 }}>Lista actualizada.</div>}
         {(error === "sync" || syncError) && <div className="err" style={{ marginBottom: 12 }}>No pudimos leer tus clientes de la plataforma de rastreo. Inténtalo en unos minutos.</div>}
 
@@ -80,6 +89,16 @@ export default async function ClientesPage({ searchParams }: { searchParams: Pro
             </tbody>
           </table>
         </div>
+
+        <form action={createSubDistributorAction} className="panel form" style={{ marginTop: 18, maxWidth: 520 }}>
+          <b>Crear subdistribuidor</b>
+          <span className="hint">Tiene su propia cuenta en tu plataforma de rastreo, con sus clientes y equipos. Solo ve lo suyo; tú ves y das soporte a todo. Sus equipos se suman a tu factura, y tú le cobras con tus planes. Le enviamos su usuario y contraseña por correo con tu nombre.</span>
+          <label>Correo<input name="email" type="email" required placeholder="distribuidor@ejemplo.com" /></label>
+          <label>Teléfono<input name="phone" placeholder="Opcional" /></label>
+          <label>Máximo de equipos<input name="devicesLimit" type="number" min={1} max={company.deviceLimit} defaultValue={Math.min(10, company.deviceLimit)} required /></label>
+          <span className="hint">Hasta {company.deviceLimit}, que es tu límite.</span>
+          <button className="btn sm">Crear subdistribuidor</button>
+        </form>
 
         {isMock && (
           <form action={mockClientAction} className="panel form" style={{ marginTop: 18 }}>

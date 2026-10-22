@@ -1,7 +1,10 @@
 import type { ClientPlan, Company, EndClient } from "@prisma/client";
 import { prisma } from "./db";
 import { formatDate, formatMoney } from "./format";
-import { clientsUnder, setUserActive } from "./gpswox";
+import { randomBytes } from "node:crypto";
+import { companyPlatformOrigin } from "./brand-web";
+import { RESELLER_OPEN_DAYS, DAY_MS } from "./config";
+import { clientsUnder, createReseller, setUserActive } from "./gpswox";
 import { reminderDayFor } from "./lifecycle";
 import { isPermSet, platformPerms } from "./perms";
 import { emailHtml, sendEmail } from "./notify";
@@ -72,6 +75,36 @@ export async function syncClients(company: Company, now = new Date()): Promise<v
     });
   }
   await prisma.endClient.updateMany({ where: { companyId: company.id, goneAt: null, gpswoxUserId: { notIn: found.map((c) => c.id) } }, data: { goneAt: now } });
+}
+
+export class SubDistributorError extends Error {}
+
+// A sub-distributor is a GPS Link reseller under the white label: the white label pays for its devices and bills it with its own plans.
+export async function createSubDistributor(company: Company, input: { email: string; phone: string; devicesLimit: number }): Promise<EndClient> {
+  if (!company.gpswoxUserId) throw new SubDistributorError("sin-usuario");
+  const email = input.email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new SubDistributorError("correo");
+  if (!Number.isInteger(input.devicesLimit) || input.devicesLimit < 1 || input.devicesLimit > company.deviceLimit) throw new SubDistributorError("limite");
+  const password = randomBytes(9).toString("base64url");
+  let id: number;
+  try {
+    id = await createReseller({ email, password, devicesLimit: input.devicesLimit, expiresAt: new Date(Date.now() + RESELLER_OPEN_DAYS * DAY_MS), phone: input.phone.trim() || undefined, managerId: company.gpswoxUserId });
+  } catch (e) {
+    console.error("[subdistribuidor] crear:", (e as Error).message);
+    throw new SubDistributorError(/email/i.test((e as Error).message) ? "correo-usado" : "plataforma");
+  }
+  await syncClients(company);
+  const origin = companyPlatformOrigin(company);
+  const contact = companyContact(company);
+  await sendEmail(email, `${company.name}: tu cuenta de distribuidor`, emailHtml(`Bienvenido a ${company.name}`, [
+    `${company.name} te creó una cuenta de distribuidor. Desde ella creas a tus clientes y sus equipos (hasta ${input.devicesLimit}).`,
+    `Usuario: ${email}`,
+    `Contraseña: ${password}`,
+    "Cámbiala cuando entres.",
+    `Contacto: ${contact}`,
+  ], { label: "Entrar a la plataforma", url: `${origin}/login` }, { name: company.name, contact }), { fromName: company.name, replyTo: company.email });
+  const created = await prisma.endClient.findUnique({ where: { companyId_gpswoxUserId: { companyId: company.id, gpswoxUserId: id } } });
+  return created ?? prisma.endClient.create({ data: { companyId: company.id, gpswoxUserId: id, email, phone: input.phone.trim() || null, isDealer: true } });
 }
 
 const lastSync = new Map<string, number>();
