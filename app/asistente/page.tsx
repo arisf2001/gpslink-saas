@@ -22,7 +22,8 @@ export default async function AsistentePage({ searchParams }: { searchParams: Pr
         {loggedIn ? (
           <>
             <AssistantChat />
-            <VoiceConnect geminiUrl={resourceUrl(company?.subdomain ?? null)} alexaUrl={process.env.ALEXA_SKILL_URL || null} color={company?.brandColor || "#0F4C5C"} />
+            {/* Gemini personal accounts cannot add custom apps yet (checked 2026-10-22); set GEMINI_CONNECT=1 when Google opens it. */}
+            <VoiceConnect geminiUrl={process.env.GEMINI_CONNECT === "1" ? resourceUrl(company?.subdomain ?? null) : null} alexaUrl={process.env.ALEXA_SKILL_URL || null} color={company?.brandColor || "#0F4C5C"} />
             <form action={iaLogoutAction} style={{ textAlign: "center", margin: "8px 0" }}>
               <input type="hidden" name="embed" value={embed ? "1" : ""} />
               <button className="linkbtn">Salir del asistente</button>

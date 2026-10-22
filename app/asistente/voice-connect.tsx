@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 // "Conectar con Gemini / Alexa": the customer links their account once from the web, the mobile app is not involved.
-export function VoiceConnect({ geminiUrl, alexaUrl, color }: { geminiUrl: string; alexaUrl: string | null; color: string }) {
+export function VoiceConnect({ geminiUrl, alexaUrl, color }: { geminiUrl: string | null; alexaUrl: string | null; color: string }) {
   const [open, setOpen] = useState<"gemini" | "alexa" | null>(null);
   const [copied, setCopied] = useState(false);
   const toggle = (v: "gemini" | "alexa") => setOpen((o) => (o === v ? null : v));
@@ -11,10 +11,10 @@ export function VoiceConnect({ geminiUrl, alexaUrl, color }: { geminiUrl: string
     <div className="panel" id="voz" style={{ maxWidth: 720, margin: "10px auto 0", padding: 14 }}>
       <div style={{ fontWeight: 700, marginBottom: 8 }}>Pregúntale a tu asistente de voz</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button className="btn sm" style={{ background: color, borderColor: color, color: "#fff" }} onClick={() => toggle("gemini")}>Conectar con Gemini</button>
+        {geminiUrl && <button className="btn sm" style={{ background: color, borderColor: color, color: "#fff" }} onClick={() => toggle("gemini")}>Conectar con Gemini</button>}
         <button className="btn sm" style={{ background: "#00a8e1", borderColor: "#00a8e1", color: "#fff" }} onClick={() => toggle("alexa")}>Conectar con Alexa</button>
       </div>
-      {open === "gemini" && (
+      {open === "gemini" && geminiUrl && (
         <div style={{ marginTop: 12, lineHeight: 1.5 }}>
           <ol style={{ paddingLeft: 18, margin: "0 0 8px" }}>
             <li>En la computadora, abre <a href="https://gemini.google.com" target="_blank" rel="noreferrer">gemini.google.com</a> → Ajustes → <b>Connected Apps</b> → <b>Add a custom app</b>.</li>
