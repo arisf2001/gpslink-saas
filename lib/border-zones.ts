@@ -177,7 +177,7 @@ export async function runBorderZones(): Promise<{ checked: number; notices: numb
     const msg = zoneMessage(kind, w.p, w.km, cut);
     const done = new Set<string>();
     const owners = users.filter((u) => u.deviceId === w.p.deviceId && u.groupId !== 1);
-    for (const o of owners.length ? owners : [{ userId: null, email: null }]) await notify(kind, { gpswoxUserId: o.userId, email: o.email, companyId: active?.id ?? null }, msg, { rules, done });
+    for (const o of owners.length ? owners : [{ userId: null, email: null, phone: null }]) await notify(kind, { gpswoxUserId: o.userId, email: o.email, phone: o.phone, companyId: active?.id ?? null }, msg, { rules, done });
     await prisma.deviceAlert.create({ data: { deviceId: w.p.deviceId, deviceName: w.p.name, companyId: active?.id ?? null, kind, sentTo: done.size } });
     summary.notices++;
   }

@@ -74,12 +74,12 @@ export async function deviceStatuses(ids: number[] | null): Promise<DeviceStatus
   });
 }
 
-export async function deviceUsers(ids: number[]): Promise<{ userId: number; deviceId: number; email: string | null; groupId: number }[]> {
+export async function deviceUsers(ids: number[]): Promise<{ userId: number; deviceId: number; email: string | null; phone: string | null; groupId: number }[]> {
   if (!ids.length) return [];
-  if (isMock()) return (await prisma.mockDevice.findMany({ where: { id: { in: ids } } })).map((d) => ({ userId: d.gpswoxUserId, deviceId: d.id, email: null, groupId: 2 }));
+  if (isMock()) return (await prisma.mockDevice.findMany({ where: { id: { in: ids } } })).map((d) => ({ userId: d.gpswoxUserId, deviceId: d.id, email: null, phone: null, groupId: 2 }));
   return withGpswoxDb(async (conn) => {
-    const [rows] = await conn.query<RowDataPacket[]>("SELECT p.user_id, p.device_id, u.email, u.group_id FROM user_device_pivot p JOIN users u ON u.id = p.user_id WHERE p.device_id IN (?)", [ids]);
-    return rows.map((r) => ({ userId: Number(r.user_id), deviceId: Number(r.device_id), email: r.email ? String(r.email) : null, groupId: Number(r.group_id) }));
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT p.user_id, p.device_id, u.email, u.phone_number, u.group_id FROM user_device_pivot p JOIN users u ON u.id = p.user_id WHERE p.device_id IN (?)", [ids]);
+    return rows.map((r) => ({ userId: Number(r.user_id), deviceId: Number(r.device_id), email: r.email ? String(r.email) : null, phone: r.phone_number ? String(r.phone_number) : null, groupId: Number(r.group_id) }));
   });
 }
 
