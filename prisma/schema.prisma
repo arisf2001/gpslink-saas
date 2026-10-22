@@ -72,6 +72,7 @@ model Company {
   brandColor           String?
   websiteUrl           String?        @db.VarChar(300)
   subdomain            String?        @unique @db.VarChar(40)
+  customDomain         String?        @unique @db.VarChar(100)
   activationEnabled    Boolean        @default(false)
   clientPlans          ClientPlan[]
   endClients           EndClient[]

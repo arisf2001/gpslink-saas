@@ -70,8 +70,16 @@ export async function logoutDestination(gpswoxUserId: number): Promise<string> {
 export async function writeBrandMap(): Promise<void> {
   const file = process.env.GPSWOX_BRANDS_FILE;
   if (!file) return;
-  const companies = await prisma.company.findMany({ where: { subdomain: { not: null }, gpswoxUserId: { not: null } }, select: { subdomain: true, gpswoxUserId: true } });
-  const map = Object.fromEntries(companies.map((c) => [`${c.subdomain}.${brandRootDomain()}`, c.gpswoxUserId]));
+  const companies = await prisma.company.findMany({
+    where: { gpswoxUserId: { not: null }, OR: [{ subdomain: { not: null } }, { customDomain: { not: null } }] },
+    select: { subdomain: true, customDomain: true, gpswoxUserId: true },
+  });
+  const map = Object.fromEntries(
+    companies.flatMap((c) => [
+      ...(c.subdomain ? [`${c.subdomain}.${brandRootDomain()}`] : []),
+      ...(c.customDomain ? [c.customDomain, `www.${c.customDomain}`] : []),
+    ].map((host) => [host, c.gpswoxUserId])),
+  );
   await mkdir(dirname(file), { recursive: true });
   await writeFile(`${file}.tmp`, JSON.stringify(map), { mode: 0o644 });
   await rename(`${file}.tmp`, file);
