@@ -1,6 +1,7 @@
 import { prisma } from "../db";
 import { aiSetting, assistantConfig, createConfirm, hasPin, t, type AiUser, type Channel, type Lang, type PendingConfirm } from "./assistant";
 import * as gps from "./gps";
+import { reverseGeocode } from "./geocode";
 import { deviceStatuses } from "../device-status";
 import { colorName, matchesVehicle, typeName, vehicleProfiles, type VehicleProfile } from "../vehicle-profile";
 
@@ -39,6 +40,7 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
     `Current local time (America/Santo_Domingo): ${localNow()}.`,
     "You only know the customer's own vehicles, through the tools. Never invent locations, speeds or data; if a tool fails, say so.",
     "Be brief and concrete (2-4 short sentences). Include the address, speed, whether the ignition is on/off when known and how long ago the last report was.",
+    "Say where a vehicle is with get_vehicle's location: street, neighbourhood or city, state, and \"near <near>\" with the distance when near is given. Never read latitude/longitude to the customer unless location and address are both unknown.",
     "When you describe one vehicle, add one short line with its GPS device status from gps_device: battery %, GSM signal (x/4), satellites, whether it is connected to the vehicle power and whether the engine is blocked. Say \"no disponible\" for missing values; never invent them. If it is not connected to the vehicle power, point it out.",
     "When several vehicles match, ask which one. If the customer has only one vehicle, use it.",
     "Customers may refer to a vehicle by its nickname, color, make, model or type (e.g. 'la jeepeta', 'el carro rojo', 'el Toyota'): pass those words as the list_vehicles search, and mention the nickname when you answer.",
@@ -114,6 +116,7 @@ export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => 
       return {
         device_id: v.id, name: v.name, plate: v.plate, ...describe((await profilesFor([v.id])).get(v.id)), status: v.online, speed: `${v.speed} ${v.speedUnit}`,
         ignition: v.engine === null ? "unknown" : v.engine ? "on" : "off", address: v.address ?? "unknown",
+        location: (await reverseGeocode(v.lat, v.lng, lang)) ?? "unknown",
         lat: v.lat, lng: v.lng, last_report: v.time, minutes_since_last_report: minutesAgo(v.timestamp), stopped_for: v.stopDuration,
         map_url: gps.mapUrl(v.lat, v.lng), street_view_url: gps.streetViewUrl(v.lat, v.lng),
         gps_device: await deviceInfo(v.id),
