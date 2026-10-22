@@ -12,7 +12,6 @@ for (const f of [".env.production.local", ".env.local", ".env"]) {
 }
 const prisma = new PrismaClient();
 const ROOT = path.join(process.env.STORAGE_DIR || path.join(process.cwd(), "storage"), "wa");
-const OWNER_WA = "gpslinkowner";
 const APP = process.env.WA_APP_URL || `http://127.0.0.1:${process.env.PORT || 3010}/api/internal/wa`;
 const KEY = createHmac("sha256", process.env.SESSION_SECRET || "").update("gpslink-wa-internal").digest("hex");
 const PAUSE_MS = 2 * 60 * 60_000;
@@ -34,7 +33,6 @@ async function ask(body) {
 
 async function handle(entry, m) {
   const { sock, companyId } = entry;
-  if (companyId === OWNER_WA) return;
   const jid = m.key.remoteJid;
   if ((entry.paused.get(jid) || 0) > Date.now()) return;
   const x = contentOf(m);
