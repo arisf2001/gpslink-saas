@@ -27,7 +27,7 @@ export async function POST(req: Request) {
   const skip = process.env.NODE_ENV !== "production" && process.env.ALEXA_SKIP_VERIFY === "1";
   const bad = skip ? null : await verifyAlexaRequest(req.headers, raw, body.request?.timestamp);
   if (bad) {
-    console.warn("[alexa] rejected:", bad);
+    console.warn("[alexa] rejected:", bad, [...req.headers.keys()].filter((k) => k.startsWith("signature")).join(","));
     return new Response(null, { status: 400 });
   }
   const appId = body.context?.System?.application?.applicationId ?? body.session?.application?.applicationId;
