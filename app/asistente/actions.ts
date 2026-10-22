@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { resolveUser } from "@/lib/ai/assistant";
 import { login } from "@/lib/ai/gps";
 import { setHomeGroups } from "@/lib/google-home";
+import { newSiriToken } from "@/lib/siri";
 import { clearSession, getSession, setSession } from "@/lib/session";
 
 export type IaLoginState = { error?: string };
@@ -32,4 +33,14 @@ export async function googleHomeGroupsAction(formData: FormData) {
     await setHomeGroups(user.userId, formData.getAll("group").map(String));
   }
   redirect(`/asistente?${embed ? "embed=1&" : ""}gh=ok#google-home`);
+}
+
+export async function siriKeyAction(formData: FormData) {
+  const hash = await getSession("ia");
+  const embed = formData.get("embed") === "1";
+  if (hash) {
+    const user = await resolveUser(hash);
+    await newSiriToken(user.userId, hash);
+  }
+  redirect(`/asistente${embed ? "?embed=1" : ""}#siri`);
 }

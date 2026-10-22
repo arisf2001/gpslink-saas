@@ -7,6 +7,7 @@ import { iaLogoutAction } from "./actions";
 import { AssistantChat } from "./chat";
 import { GoogleHomeGroups } from "./google-home-groups";
 import { IaLogin } from "./login";
+import { SiriConnect } from "./siri-connect";
 import { VoiceConnect } from "./voice-connect";
 
 export const metadata: Metadata = { title: "Asistente IA | GPS Link" };
@@ -26,6 +27,7 @@ export default async function AsistentePage({ searchParams }: { searchParams: Pr
             <AssistantChat />
             {/* Gemini personal accounts cannot add custom apps yet (checked 2026-10-22); set GEMINI_CONNECT=1 when Google opens it. */}
             <VoiceConnect geminiUrl={process.env.GEMINI_CONNECT === "1" ? resourceUrl(company?.subdomain ?? null) : null} alexaUrl={process.env.ALEXA_SKILL_URL || null} color={company?.brandColor || "#0F4C5C"} />
+            <SiriConnect hash={hash} embed={embed} />
             <GoogleHomeGroups hash={hash} embed={embed} saved={sp.gh === "ok"} />
             <form action={iaLogoutAction} style={{ textAlign: "center", margin: "8px 0" }}>
               <input type="hidden" name="embed" value={embed ? "1" : ""} />

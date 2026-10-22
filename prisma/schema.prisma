@@ -679,3 +679,14 @@ model GoogleHomeGroups {
   groups       String   @db.Text
   updatedAt    DateTime @updatedAt
 }
+
+// Personal key for the iPhone Siri shortcut (one per GPSWOX user).
+model SiriKey {
+  gpswoxUserId   Int       @id
+  tokenHash      String    @unique
+  tokenSealed    String    @db.Text
+  hashSealed     String    @db.Text
+  conversationId String?
+  lastUsedAt     DateTime?
+  createdAt      DateTime  @default(now())
+}
