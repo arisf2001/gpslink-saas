@@ -1,6 +1,7 @@
 import { prisma } from "../db";
 import { aiSetting, assistantConfig, createConfirm, createZoneConfirm, hasPin, t, type AiUser, type Channel, type Lang, type PendingConfirm } from "./assistant";
 import * as gps from "./gps";
+import { mapAreaAt, zoneAt } from "./areas";
 import { findPlace, insidePlace, reverseGeocode } from "./geocode";
 import { createRedZone, deleteRedZone, listRedZones, MAX_ZONE_KM, zoneDevices, zoneShape } from "../red-zones";
 import { CUT_SPEED_KMH } from "../border-zones";
@@ -48,6 +49,7 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
     `Current local time (America/Santo_Domingo): ${localNow()}.`,
     "You only know the customer's own vehicles, through the tools. Never invent locations, speeds or data; if a tool fails, say so.",
     "Be brief and concrete (2-4 short sentences). Include the address, speed, whether the ignition is on/off when known and how long ago the last report was.",
+    "When get_vehicle gives inside_zone (the customer's own geofence), say first that it is inside that zone, e.g. 'está dentro de la zona Casa'. Otherwise, when inside_place is given, the vehicle is really inside that mapped place: say it, e.g. 'está dentro de la escuela X', 'en el parqueo de la plaza Y' (inside_kind parqueo inside inside_of), 'dentro del parque Z'. Never say a vehicle is inside a place only because of location.near: near is a nearby point, so say 'a N metros de …' (only when near_meters is 30 or less you may say 'en …'). After the zone or place, still give the street and city.",
     "Say where a vehicle is with get_vehicle's location: street, neighbourhood or city, state, and \"near <near>\" with the distance when near is given. When location.near is given, say what kind of place it is (near_kind) and its street, e.g. 'a 200 metros de la estación de combustible Shell de la Avenida Duarte' or 'en el parqueo de la Plaza Las Américas'. To send a location by WhatsApp use send_location_whatsapp (only to the customer's own linked WhatsApp). Never read latitude/longitude to the customer unless location and address are both unknown. Say how long ago it reported with last_report_ago (never a raw count of minutes).",
     spoken || channel === "alexa"
       ? "Spoken answer: no GPS device status line. Mention battery, signal or power only when asked or when something is wrong (not connected to the vehicle power, low battery, engine blocked). Never say a value is unavailable: just skip unknown values (ignition, satellites, etc.)."
@@ -115,6 +117,12 @@ async function deviceInfo(deviceId: number) {
   };
 }
 
+// Named area the vehicle is inside: the customer's own geofence first, then a mapped place outline.
+async function whereInside(userId: number, v: gps.Vehicle, lang: Lang) {
+  const [zone, area] = await Promise.all([zoneAt(userId, v.id, v.lat, v.lng), mapAreaAt(v.lat, v.lng, lang)]);
+  return { inside_zone: zone, inside_place: zone ? null : area };
+}
+
 // Read-only vehicle tools, shared by the chat engine and the MCP connector (Gemini).
 export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => void = () => {}) {
   let cachedVehicles: gps.Vehicle[] | null = null;
@@ -146,6 +154,7 @@ export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => 
         device_id: v.id, name: v.name, plate: v.plate, ...describe((await profilesFor([v.id])).get(v.id)), status: v.online, speed: `${v.speed} ${v.speedUnit}`,
         ignition: v.engine === null ? "unknown" : v.engine ? "on" : "off", address: v.address ?? "unknown",
         location: (await reverseGeocode(v.lat, v.lng, lang)) ?? "unknown",
+        ...(await whereInside(user.userId, v, lang)),
         lat: v.lat, lng: v.lng, last_report: v.time, minutes_since_last_report: minutesAgo(v.timestamp), last_report_ago: timeAgo(minutesAgo(v.timestamp), lang), stopped_for: v.stopDuration,
         map_url: gps.mapUrl(v.lat, v.lng), street_view_url: gps.streetViewUrl(v.lat, v.lng),
         gps_device: await deviceInfo(v.id),
@@ -190,9 +199,17 @@ export async function sendLocationWhatsApp(user: AiUser, v: gps.Vehicle, lang: L
   if (!targets.size) return { error: "This account has no WhatsApp number: tell the customer to add their WhatsApp number (with country code) in their profile on the tracking platform, then ask again." };
   const place = await reverseGeocode(v.lat, v.lng, lang);
   const where = place ? [place.street, place.neighbourhood, place.city, place.state].filter(Boolean).join(", ") : v.address ?? `${v.lat}, ${v.lng}`;
+  const { inside_zone, inside_place } = await whereInside(user.userId, v, lang);
+  const insideName = inside_place && (inside_place.inside ? [inside_place.inside_kind, inside_place.inside].filter(Boolean).join(" ") : null);
+  const insideOf = inside_place?.inside_of ? [inside_place.inside_of_kind, inside_place.inside_of].filter(Boolean).join(" ") : null;
+  const inside = inside_zone
+    ? `${t(lang, "Dentro de la zona", "Inside zone")}: ${inside_zone}`
+    : insideName || insideOf
+      ? `${t(lang, "Dentro de", "Inside")}: ${[insideName ?? inside_place?.inside_kind, insideOf].filter(Boolean).join(t(lang, " de ", " at "))}`
+      : "";
   const near = place?.near ? `${t(lang, "Cerca de", "Near")}: ${[place.nearKind, place.near].filter(Boolean).join(" ")}${place.nearStreet ? ` (${place.nearStreet})` : ""}, ${place.nearMeters} m` : "";
   const ago = timeAgo(minutesAgo(v.timestamp), lang);
-  const text = [`*${v.name}${v.plate ? ` (${v.plate})` : ""}*`, `${t(lang, "Ubicación", "Location")}: ${where}`, near, `${t(lang, "Velocidad", "Speed")}: ${v.speed} ${v.speedUnit}`, ago ? `${t(lang, "Último reporte", "Last report")}: ${t(lang, "hace", "")} ${ago}${t(lang, "", " ago")}`.replace(/\s+/g, " ") : "", gps.mapUrl(v.lat, v.lng)].filter(Boolean).join("\n");
+  const text = [`*${v.name}${v.plate ? ` (${v.plate})` : ""}*`, `${t(lang, "Ubicación", "Location")}: ${where}`, inside, near, `${t(lang, "Velocidad", "Speed")}: ${v.speed} ${v.speedUnit}`, ago ? `${t(lang, "Último reporte", "Last report")}: ${t(lang, "hace", "")} ${ago}${t(lang, "", " ago")}`.replace(/\s+/g, " ") : "", gps.mapUrl(v.lat, v.lng)].filter(Boolean).join("\n");
   const sentTo: string[] = [];
   for (const [phone, companyId] of targets) {
     const viaBrand = companyId !== DIRECT_WA && (await queueWa(companyId, phone, text).catch(() => false));

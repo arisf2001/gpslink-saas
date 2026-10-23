@@ -389,6 +389,16 @@ export async function userApiHash(userId: number): Promise<string | null> {
 }
 
 // Active platform users whose profile phone is this WhatsApp number (digits with country code), admins first.
+export type GeofenceRow = { id: number; name: string; type: string; radius: number | null; center: string | null; coordinates: string | null; device_id: number | null };
+
+export async function userGeofences(userId: number): Promise<GeofenceRow[]> {
+  if (isMock()) return [];
+  return withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT id, name, type, radius, center, coordinates, device_id FROM geofences WHERE user_id = ? AND active = 1", [userId]);
+    return rows.map((r) => ({ id: Number(r.id), name: String(r.name ?? ""), type: String(r.type ?? ""), radius: r.radius === null ? null : Number(r.radius), center: r.center ?? null, coordinates: r.coordinates ?? null, device_id: r.device_id === null ? null : Number(r.device_id) }));
+  });
+}
+
 export async function userPhones(): Promise<string[]> {
   if (isMock()) return [];
   return withGpswoxDb(async (conn) => {

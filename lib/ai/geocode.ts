@@ -49,6 +49,9 @@ const KINDS: Record<string, [string, string]> = {
   fire_station: ["bomberos", "fire station"], hotel: ["hotel", "hotel"], stadium: ["estadio", "stadium"], sports_centre: ["centro deportivo", "sports centre"], playground: ["parque infantil", "playground"],
   townhall: ["ayuntamiento", "town hall"], post_office: ["correo", "post office"], bus_station: ["terminal de autobuses", "bus station"], aerodrome: ["aeropuerto", "airport"], cemetery: ["cementerio", "cemetery"],
   pitch: ["cancha", "sports field"], gym: ["gimnasio", "gym"], fitness_centre: ["gimnasio", "gym"], department_store: ["tienda por departamentos", "department store"], clothes: ["tienda de ropa", "clothing store"],
+  retail: ["zona comercial", "shopping area"], golf_course: ["campo de golf", "golf course"], marina: ["marina", "marina"], water_park: ["parque acuático", "water park"],
+  attraction: ["atracción turística", "attraction"], zoo: ["zoológico", "zoo"], theme_park: ["parque de diversiones", "theme park"], museum: ["museo", "museum"],
+  community_centre: ["centro comunitario", "community centre"],
 };
 
 export function placeKind(category: string | undefined, type: string | undefined, lang: Lang): string | null {
