@@ -9,9 +9,10 @@ type Zone = { name: string; deviceId: number | null; circle: { center: Pt; radiu
 const zoneCache = new Map<number, { at: number; zones: Zone[] }>();
 
 const valid = (p: Pt | null | undefined): p is Pt => !!p && Number.isFinite(p.lat) && Number.isFinite(p.lng) && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180;
-const json = <T>(s: string | null): T | null => {
+// mysql2 may hand JSON columns over already parsed.
+const json = <T>(s: unknown): T | null => {
   try {
-    return s ? (JSON.parse(s) as T) : null;
+    return typeof s === "string" ? (JSON.parse(s) as T) : ((s ?? null) as T | null);
   } catch {
     return null;
   }

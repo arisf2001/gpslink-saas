@@ -389,7 +389,7 @@ export async function userApiHash(userId: number): Promise<string | null> {
 }
 
 // Active platform users whose profile phone is this WhatsApp number (digits with country code), admins first.
-export type GeofenceRow = { id: number; name: string; type: string; radius: number | null; center: string | null; coordinates: string | null; device_id: number | null };
+export type GeofenceRow = { id: number; name: string; type: string; radius: number | null; center: unknown; coordinates: unknown; device_id: number | null };
 
 export async function userGeofences(userId: number): Promise<GeofenceRow[]> {
   if (isMock()) return [];
