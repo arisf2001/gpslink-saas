@@ -1,0 +1,692 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlanCategory {
+  WHITE_LABEL
+}
+
+enum CompanyStatus {
+  TRIAL
+  ACTIVE
+  BLOCKED
+  CANCELED
+}
+
+model Plan {
+  id          String       @id @default(cuid())
+  category    PlanCategory
+  devices     Int
+  name        String
+  priceCents  Int          @default(0)
+  currency    String       @default("usd")
+  features    String       @db.Text
+  active      Boolean      @default(true)
+  highlighted Boolean      @default(false)
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  companies   Company[]
+
+  @@unique([category, devices])
+}
+
+// Yearly price per device; the tier is picked by how many active devices the company has.
+model PriceTier {
+  id         String   @id @default(cuid())
+  minDevices Int      @unique
+  priceCents Int      @default(0)
+  currency   String   @default("usd")
+  updatedAt  DateTime @updatedAt
+}
+
+model Company {
+  id                   String         @id @default(cuid())
+  name                 String
+  slug                 String         @unique
+  contactName          String
+  email                String         @unique
+  phone                String
+  passwordHash         String
+  planId               String
+  plan                 Plan           @relation(fields: [planId], references: [id])
+  status               CompanyStatus  @default(TRIAL)
+  trialEndsAt          DateTime
+  gpswoxUserId         Int?
+  deviceLimit          Int            @default(50)
+  billingEnabled       Boolean        @default(true)
+  provisionError       String?        @db.Text
+  stripeCustomerId     String?
+  cardPaymentMethodId  String?
+  cardBrand            String?
+  cardLast4            String?
+  users                CompanyUser[]
+  tickets              SupportTicket[]
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  invoices             Invoice[]
+  notifications        Notification[]
+  devices              BilledDevice[]
+  aiEnabled            Boolean        @default(false)
+  aiName               String?
+  brandColor           String?
+  websiteUrl           String?        @db.VarChar(300)
+  subdomain            String?        @unique @db.VarChar(40)
+  customDomain         String?        @unique @db.VarChar(100)
+  unitPriceCents       Int?
+  adminNotes           String?        @db.Text
+  hiddenTabs           String?        @db.VarChar(200)
+  clientPerms          Json?
+  siteData             Json?
+  activationEnabled    Boolean        @default(false)
+  clientPlans          ClientPlan[]
+  endClients           EndClient[]
+}
+
+// One GPSWOX device of a company. nextBillAt is when it must appear on an invoice (trial end or its yearly anniversary).
+model BilledDevice {
+  id         String    @id @default(cuid())
+  companyId  String
+  company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deviceId   Int
+  addedAt    DateTime
+  nextBillAt DateTime
+  removedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([companyId, deviceId])
+}
+
+model Invoice {
+  id             String    @id @default(cuid())
+  companyId      String
+  company        Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  periodStart    DateTime
+  periodEnd      DateTime
+  dueAt          DateTime
+  devices        Int
+  newDevices     Int
+  renewals       Int
+  unitPriceCents Int
+  aiCents        Int       @default(0)
+  amountCents    Int
+  currency       String    @default("usd")
+  status         String    @default("OPEN")
+  paidAt         DateTime?
+  method         String?
+  reference      String?   @unique
+  note           String?
+  createdAt      DateTime  @default(now())
+
+  @@unique([companyId, periodStart])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  kind      String
+  dedupeKey String   @unique
+  channels  String
+  error     String?  @db.Text
+  createdAt DateTime @default(now())
+}
+
+model MockDevice {
+  id           Int      @id @default(autoincrement())
+  gpswoxUserId Int
+  createdAt    DateTime @default(now())
+  name         String?
+  other        String?  @db.Text
+  reportedAt   DateTime?
+  imei         String?
+  lat          Float?
+  lng          Float?
+  speed        Float?
+}
+
+model ProcessedEvent {
+  id        String   @id
+  createdAt DateTime @default(now())
+}
+
+// A white label's own plan for its clients: price per device for each period of `months`.
+model ClientPlan {
+  id         String      @id @default(cuid())
+  companyId  String
+  company    Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name       String
+  priceCents Int
+  currency   String      @default("usd")
+  months     Int         @default(12)
+  active     Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  clients    EndClient[]
+}
+
+// A GPSWOX user under a white label: its client, one of its dealers, or a dealer's client.
+// Without a plan it never expires.
+model EndClient {
+  id           String          @id @default(cuid())
+  companyId    String
+  company      Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  gpswoxUserId Int
+  managerId    Int?
+  email        String
+  phone        String?
+  isDealer     Boolean         @default(false)
+  devices      Int             @default(0)
+  planId       String?
+  plan         ClientPlan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
+  paidUntil    DateTime?
+  blockReason  String?
+  goneAt       DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  payments     ClientPayment[]
+  notices      ClientNotice[]
+
+  @@unique([companyId, gpswoxUserId])
+}
+
+model ClientPayment {
+  id          String    @id @default(cuid())
+  endClientId String
+  endClient   EndClient @relation(fields: [endClientId], references: [id], onDelete: Cascade)
+  amountCents Int
+  currency    String
+  periods     Int
+  method      String
+  note        String?
+  paidUntil   DateTime
+  createdAt   DateTime  @default(now())
+}
+
+model ClientNotice {
+  id          String    @id @default(cuid())
+  endClientId String
+  endClient   EndClient @relation(fields: [endClientId], references: [id], onDelete: Cascade)
+  kind        String
+  dedupeKey   String    @unique
+  channels    String
+  error       String?   @db.Text
+  createdAt   DateTime  @default(now())
+}
+
+model MockClient {
+  id        Int      @id @default(autoincrement())
+  managerId Int
+  email     String
+  phone     String?
+  groupId   Int      @default(2)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model AiSetting {
+  id                Int      @id @default(1)
+  enabled           Boolean  @default(false)
+  monthlyPriceCents Int      @default(0)
+  model             String   @default("gpt-5-mini")
+  updatedAt         DateTime @updatedAt
+}
+
+model AiAppKey {
+  id        String    @id @default(cuid())
+  name      String
+  prefix    String
+  keyHash   String    @unique
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+}
+
+model AiConversation {
+  id           String   @id @default(cuid())
+  gpswoxUserId Int
+  companyId    String?
+  channel      String
+  messages     String   @db.LongText
+  turns        Int      @default(0)
+  tokensIn     Int      @default(0)
+  tokensOut    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([companyId, createdAt])
+}
+
+model AiPin {
+  gpswoxUserId Int       @id
+  pinHash      String
+  failed       Int       @default(0)
+  lockedUntil  DateTime?
+  updatedAt    DateTime  @updatedAt
+}
+
+model AiConfirm {
+  id           String    @id
+  gpswoxUserId Int
+  deviceId     Int
+  deviceName   String
+  command      String
+  zoneId       String?
+  expiresAt    DateTime
+  usedAt       DateTime?
+  createdAt    DateTime  @default(now())
+}
+
+model AiCommandLog {
+  id           String   @id @default(cuid())
+  gpswoxUserId Int
+  companyId    String?
+  deviceId     Int
+  deviceName   String
+  command      String
+  channel      String
+  ok           Boolean
+  error        String?  @db.Text
+  createdAt    DateTime @default(now())
+}
+
+model WaSession {
+  companyId String    @id
+  want      Boolean   @default(false)
+  status    String    @default("OFF")
+  qr        String?   @db.Text
+  phone     String?
+  error     String?   @db.Text
+  beatAt    DateTime?
+  updatedAt DateTime  @updatedAt
+}
+
+model WaLink {
+  id             String    @id @default(cuid())
+  companyId      String
+  phone          String
+  gpswoxUserId   Int
+  hashSealed     String    @db.Text
+  conversationId String?
+  pendingToken   String?   @db.Text
+  pendingUntil   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([companyId, phone])
+}
+
+model WaOutbox {
+  id        Int       @id @default(autoincrement())
+  companyId String
+  phone     String
+  text      String    @db.Text
+  status    String    @default("pending")
+  error     String?   @db.Text
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  @@index([status, companyId])
+}
+
+model MetaSetting {
+  id              Int      @id @default(1)
+  enabled         Boolean  @default(false)
+  phoneNumberId   String?
+  wabaId          String?
+  tokenSealed     String?  @db.Text
+  appSecretSealed String?  @db.Text
+  verifyToken     String
+  template        String?
+  templateLang    String   @default("es")
+  graphVersion    String   @default("v23.0")
+  updatedAt       DateTime @updatedAt
+}
+
+model MetaLog {
+  id        Int      @id @default(autoincrement())
+  direction String
+  phone     String
+  text      String   @db.Text
+  wamid     String?  @unique
+  ok        Boolean  @default(true)
+  error     String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model AlertSetting {
+  id           Int      @id @default(1)
+  enabled      Boolean  @default(true)
+  ownerPhone   String?  @db.VarChar(30)
+  lowBattery   Int      @default(20)
+  offlineHours Int      @default(24)
+  lastEventId  Int      @default(0)
+  zonesEnabled Boolean  @default(true)
+  zoneCut      Boolean  @default(true)
+  updatedAt    DateTime @updatedAt
+}
+
+// Who receives each notification and by which channel (see lib/notifications.ts for the catalog and defaults).
+model NotificationRule {
+  kind        String   @id @db.VarChar(40)
+  clientWa    Boolean  @default(false)
+  clientEmail Boolean  @default(false)
+  brandWa     Boolean  @default(false)
+  brandEmail  Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
+}
+
+// Haiti border zone of each vehicle and the state of the automatic engine stop (lib/border-zones.ts).
+model BorderZoneState {
+  deviceId  Int       @id
+  zone      String?   @db.VarChar(10)
+  cutState  String?   @db.VarChar(10)
+  cutAt     DateTime?
+  cutError  String?   @db.VarChar(255)
+  updatedAt DateTime  @updatedAt
+}
+
+model DeviceAlertState {
+  deviceId  Int      @id
+  state     String   @db.Text
+  updatedAt DateTime @updatedAt
+}
+
+model DeviceAlert {
+  id         Int      @id @default(autoincrement())
+  deviceId   Int
+  deviceName String
+  companyId  String?
+  kind       String
+  sentTo     Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// "Prueba gratis": the account is only created after the 6-digit email code is confirmed. payload is AES-GCM encrypted (contains the password).
+model SignupVerification {
+  id        String   @id @default(cuid())
+  email     String
+  codeHash  String
+  payload   String   @db.Text
+  attempts  Int      @default(0)
+  resends   Int      @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}
+
+// OAuth 2.0 for voice/AI assistants (Gemini custom app via MCP, Alexa account linking).
+// The customer signs in with their GPS Link user/password; tokens map to their sealed user_api_hash.
+model OAuthClient {
+  id           String   @id @default(cuid())
+  clientId     String   @unique
+  secretHash   String?
+  name         String
+  redirectUris String   @db.Text
+  createdAt    DateTime @default(now())
+}
+
+model OAuthCode {
+  id          String   @id @default(cuid())
+  codeHash    String   @unique
+  clientId    String
+  redirectUri String   @db.Text
+  challenge   String?
+  sealedHash  String   @db.Text
+  brand       String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+}
+
+model OAuthToken {
+  id               String   @id @default(cuid())
+  accessHash       String   @unique
+  refreshHash      String   @unique
+  clientId         String
+  sealedHash       String   @db.Text
+  brand            String?
+  expiresAt        DateTime
+  refreshExpiresAt DateTime
+  createdAt        DateTime @default(now())
+
+  @@index([clientId])
+}
+
+// SIM cards bought from mobile carriers (Telebay first). The carrier is recognized by the ICCID prefix; prices are per year.
+model SimCarrier {
+  code            String   @id @db.VarChar(30)
+  name            String
+  iccidPrefixes   String
+  renewCents      Int      @default(0)
+  reactivateCents Int      @default(0)
+  agencyRenewCents      Int @default(0)
+  agencyReactivateCents Int @default(0)
+  supplierContact String?
+  supplierEmail   String?
+  supplierPhone   String?
+  supplierWeb     String?
+  supplierNotes   String?  @db.Text
+  currency        String   @default("usd")
+  active          Boolean  @default(true)
+  updatedAt       DateTime @updatedAt
+}
+
+model SimCard {
+  iccid       String    @id @db.VarChar(25)
+  carrierCode String    @db.VarChar(30)
+  msisdn      String?
+  imsi        String?
+  imei        String?
+  status      Int       @default(0)
+  packageName String?
+  totalMb     Float     @default(0)
+  usedMb      Float     @default(0)
+  activatedAt DateTime?
+  expiresAt   DateTime?
+  country     String?
+  deviceId    Int?
+  deviceName  String?
+  ownerUserId Int?
+  ownerEmail  String?
+  ownerPhone  String?
+  companyId   String?
+  linkSource  String?
+  nickname    String?   @db.VarChar(190)
+  tbCustomer  String?
+  panelOnly   Boolean   @default(false)
+  customerName String?  @db.VarChar(190)
+  notes       String?   @db.Text
+  renewCents  Int?
+  reactivateCents Int?
+  firstSeenAt DateTime  @default(now())
+  lastSyncAt  DateTime  @default(now())
+  lastUsageAt DateTime?
+  goneAt      DateTime?
+
+  @@index([expiresAt])
+  @@index([deviceId])
+}
+
+model SimEvent {
+  id        Int      @id @default(autoincrement())
+  iccid     String   @db.VarChar(25)
+  kind      String
+  detail    String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([iccid])
+}
+
+model SimRenewal {
+  id            String    @id @default(cuid())
+  token         String    @unique
+  iccid         String    @db.VarChar(25)
+  expiresAt     DateTime?
+  amountCents   Int
+  currency      String    @default("usd")
+  reactivation  Boolean   @default(false)
+  status        String    @default("PENDING")
+  stripeSession String?   @unique
+  paidAt        DateTime?
+  doneAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([iccid])
+  @@index([status])
+}
+
+model SimNotice {
+  id        Int      @id @default(autoincrement())
+  dedupeKey String   @unique
+  iccid     String   @db.VarChar(25)
+  kind      String
+  channels  String   @default("")
+  error     String?  @db.Text
+  createdAt DateTime @default(now())
+}
+
+// Pay-per-device activation offer (owner panel). Every charge covers 12 months.
+model ActivationSetting {
+  id             Int      @id @default(1)
+  trackEnabled   Boolean  @default(false)
+  chargePlatform Boolean  @default(true)
+  platformCents  Int      @default(0)
+  chargeSim      Boolean  @default(false)
+  simCents       Int      @default(0)
+  currency       String   @default("usd")
+  updatedAt      DateTime @updatedAt
+}
+
+// One device a track user activates: card saved first, charged once the device has reported for 5 hours.
+model DeviceActivation {
+  id              String    @id @default(cuid())
+  gpswoxUserId    Int
+  email           String
+  companyId       String?
+  model           String    @db.VarChar(20)
+  imei            String    @db.VarChar(20)
+  name            String
+  status          String    @default("CARD") @db.VarChar(20)
+  deviceId        Int?
+  stripeCustomerId String?
+  paymentMethodId String?
+  subscriptionId  String?   @unique
+  amountCents     Int       @default(0)
+  items           String?
+  firstSignalAt   DateTime?
+  activatedAt     DateTime?
+  expiresAt       DateTime?
+  simIccid        String?
+  error           String?   @db.Text
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status])
+  @@index([imei])
+}
+
+// Public site settings (gpslinkusa.com): Spanish shows prices in RD$ at this rate.
+model SiteSetting {
+  id      Int   @id @default(1)
+  dopRate Float @default(60)
+}
+
+// Extra admins (employees) of a white label: same account, own login; only the owner manages them and the card.
+model CompanyUser {
+  id           String    @id @default(cuid())
+  companyId    String
+  company      Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name         String
+  email        String    @unique
+  passwordHash String
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([companyId])
+}
+
+// Service tickets that a white label opens to GPS Link; status: abierto (waiting for GPS Link), respondido, cerrado.
+model SupportTicket {
+  id         String          @id @default(cuid())
+  companyId  String
+  company    Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  subject    String          @db.VarChar(150)
+  device     String?         @db.VarChar(120)
+  status     String          @default("abierto") @db.VarChar(12)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  messages   TicketMessage[]
+
+  @@index([status, updatedAt])
+  @@index([companyId])
+}
+
+model TicketMessage {
+  id          String        @id @default(cuid())
+  ticketId    String
+  ticket      SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fromAdmin   Boolean       @default(false)
+  author      String        @db.VarChar(120)
+  authorEmail String?       @db.VarChar(200)
+  body        String        @db.Text
+  image       String?       @db.VarChar(100)
+  createdAt   DateTime      @default(now())
+
+  @@index([ticketId])
+}
+
+model RedZone {
+  id           String   @id @default(cuid())
+  gpswoxUserId Int
+  name         String   @db.VarChar(120)
+  lat          Float
+  lng          Float
+  radiusM      Int?
+  geometry     String?  @db.MediumText
+  bbox         String?  @db.VarChar(120)
+  deviceIds    String   @default("[]") @db.VarChar(4000)
+  cut          Boolean  @default(true)
+  active       Boolean  @default(false)
+  geofenceId   Int?
+  createdAt    DateTime @default(now())
+
+  @@index([gpswoxUserId])
+}
+
+model RedZoneState {
+  zoneId    String
+  deviceId  Int
+  cutState  String?   @db.VarChar(10)
+  cutAt     DateTime?
+  cutError  String?   @db.VarChar(255)
+  updatedAt DateTime  @updatedAt
+
+  @@id([zoneId, deviceId])
+}
+
+model GoogleHomeGroups {
+  gpswoxUserId Int      @id
+  groups       String   @db.Text
+  updatedAt    DateTime @updatedAt
+}
+
+// Personal key for the iPhone Siri shortcut (one per GPSWOX user).
+model SiriKey {
+  gpswoxUserId   Int       @id
+  tokenHash      String    @unique
+  tokenSealed    String    @db.Text
+  hashSealed     String    @db.Text
+  conversationId String?
+  lastUsedAt     DateTime?
+  createdAt      DateTime  @default(now())
+}
