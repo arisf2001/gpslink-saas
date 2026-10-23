@@ -24,7 +24,7 @@ const T = {
     lead: "Vende rastreo satelital con tu nombre, tu logo y tu app. Nosotros ponemos los servidores; tú pones los clientes.",
     heroList: ["Plataforma web con tu marca, gratis", "App móvil con tu marca, gratis", "Vende paquetes desde 1 equipo", "Crea dealers con su propia marca", "Cobra a tus clientes a tu manera", "Apagado de motor, alertas e historial"],
     start: (m: number) => `Empezar ${m} meses gratis`, how: "Cómo funciona",
-    phoneAlt: "App de rastreo GPS",
+    tags: [["Encendido", "Sí"], ["Velocidad", "68 km/h"], ["Zona", "Dentro de \"Almacén\""], ["Batería", "100%"], ["Combustible", "32%"], ["Último reporte", "Hace 5 s"], ["Motor", "No bloqueado"], ["Horas de motor", "4 h 6 min"]],
     plans: "Planes", plansSub: "Pagas por equipo al año. Mientras más equipos, mejor precio.",
     featsH: "Todo lo que puedes hacer con tu marca blanca", featsSub: "Todos los paquetes incluyen todas las funciones. Solo cambia la cantidad de equipos.",
     appAlt: "App de rastreo GPS con mapa, velocidad y vista de la calle", appH: "App móvil con tu marca, gratis",
@@ -47,7 +47,7 @@ const T = {
     lead: "Sell satellite tracking under your name, your logo and your app. We run the servers; you bring the clients.",
     heroList: ["Web platform with your brand, free", "Mobile app with your brand, free", "Sell packages from 1 device", "Create dealers with their own brand", "Charge your clients your way", "Engine stop, alerts and history"],
     start: (m: number) => `Start ${m} months free`, how: "How it works",
-    phoneAlt: "GPS tracking app",
+    tags: [["Ignition", "On"], ["Speed", "42 mph"], ["Geofence", "Inside \"Warehouse\""], ["Battery", "100%"], ["Fuel", "32%"], ["Last report", "5 s ago"], ["Engine", "Not blocked"], ["Engine hours", "4 h 6 min"]],
     plans: "Plans", plansSub: "You pay per device per year. The more devices, the better the price.",
     featsH: "Everything you can do with your white label", featsSub: "Every package includes every feature. Only the number of devices changes.",
     appAlt: "GPS tracking app with map, speed and street view", appH: "Mobile app with your brand, free",
@@ -72,6 +72,15 @@ export default async function Home() {
     <>
       <SiteNav path="/" />
       <div className="hero">
+        <video className="hero-v" autoPlay muted loop playsInline preload="auto" poster="/hero.jpg" aria-hidden="true">
+          <source src="/hero-m.mp4" type="video/mp4" media="(max-width: 900px)" />
+          <source src="/hero.mp4" type="video/mp4" />
+        </video>
+        <div className="hero-tags" aria-hidden="true">
+          {t.tags.map(([k, v], i) => (
+            <div key={k} className={`htag h${i}`}><b>{k}</b><span>{v}</span></div>
+          ))}
+        </div>
         <div className="wrap">
           <div className="t">
             <div className="badge">{t.badge(months)}</div>
@@ -87,8 +96,6 @@ export default async function Home() {
             <Link href="#como-funciona" className="btn o">{t.how}</Link>
             <TrackLoginForm compact lang={lang} googleUrl={`${trackerUrl()}/google/login`} />
           </div>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="ph" src="/phone.png" alt={t.phoneAlt} />
         </div>
       </div>
 
