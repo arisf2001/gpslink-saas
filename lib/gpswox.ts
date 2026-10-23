@@ -389,6 +389,14 @@ export async function userApiHash(userId: number): Promise<string | null> {
 }
 
 // Active platform users whose profile phone is this WhatsApp number (digits with country code), admins first.
+export async function userPhones(): Promise<string[]> {
+  if (isMock()) return [];
+  return withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT phone_number FROM users WHERE active = 1 AND phone_number IS NOT NULL AND phone_number <> ''");
+    return rows.map((r) => String(r.phone_number));
+  });
+}
+
 export async function usersByPhone(phone: string): Promise<number[]> {
   const digits = phone.replace(/\D/g, "");
   if (digits.length < 8 || isMock()) return [];

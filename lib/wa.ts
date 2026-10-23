@@ -4,7 +4,7 @@ import { redZoneEngineReply } from "./red-zones";
 import { aiSetting, confirmCommand, rateLimit, resolveUser, type AiUser } from "./ai/assistant";
 import { chat } from "./ai/engine";
 import { prisma } from "./db";
-import { userApiHash, usersByPhone } from "./gpswox";
+import { userApiHash, userPhones, usersByPhone } from "./gpswox";
 
 const secret = () => {
   const value = process.env.SESSION_SECRET;
@@ -90,6 +90,17 @@ export async function linkPhone(companyId: string, phone: string, user: AiUser) 
 }
 
 // Users whose phone matches: the track profile (GPSWOX) first, then the gpslinkusa.com company and client records.
+/** Every WhatsApp number in a profile (track.gpslinkusa.com users, gpslinkusa.com companies and clients). */
+export async function profilePhones(): Promise<string[]> {
+  const [track, companies, clients] = await Promise.all([
+    userPhones().catch((): string[] => []),
+    prisma.company.findMany({ where: { gpswoxUserId: { not: null } }, select: { phone: true } }),
+    prisma.endClient.findMany({ where: { phone: { not: null } }, select: { phone: true } }),
+  ]);
+  const all = [...track, ...companies.map((c) => c.phone), ...clients.map((c) => c.phone)].map(waNumber);
+  return [...new Set(all.filter((p): p is string => !!p))];
+}
+
 async function idsByPhone(phone: string): Promise<number[]> {
   const tail = { endsWith: phone.slice(-7) };
   const [track, companies, clients] = await Promise.all([

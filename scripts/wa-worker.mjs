@@ -5,7 +5,7 @@ import { createHmac } from "crypto";
 import path from "path";
 import pino from "pino";
 import { PrismaClient } from "@prisma/client";
-import makeWASocket, { ALL_WA_PATCH_NAMES, Browsers, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, useMultiFileAuthState as loadAuthState } from "@whiskeysockets/baileys";
+import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, useMultiFileAuthState as loadAuthState } from "@whiskeysockets/baileys";
 
 for (const f of [".env.production.local", ".env.local", ".env"]) {
   try { process.loadEnvFile(f); } catch {}
@@ -39,6 +39,7 @@ async function handle(entry, m) {
   const text = x.conversation || x.extendedTextMessage?.text || x.imageMessage?.caption || "";
   const pn = m.key.senderPn || m.key.participantPn;
   if (jid.endsWith("@lid") && pn) remember(entry, [[jid, pn]]);
+  if (jid.endsWith("@lid") && !pn && !entry.lids.has(digitsOf(jid)) && Date.now() - entry.learnedAt > 10 * 60_000) await learnLids(entry);
   const phone = digitsOf(jid.endsWith("@lid") ? pn || entry.lids.get(digitsOf(jid)) : jid);
   if (!phone) return log(companyId, "mensaje sin número", jid.split("@")[1]);
   await sock.readMessages([m.key]).catch(() => {});
@@ -82,6 +83,22 @@ function remember(entry, pairs) {
   if (changed) writeFile(path.join(entry.dir, "lid-map.json"), JSON.stringify(Object.fromEntries(entry.lids)), { mode: 0o600 }).catch(() => {});
 }
 
+// Ask WhatsApp for the LID of every profile number.
+async function learnLids(entry) {
+  entry.learnedAt = Date.now();
+  try {
+    const r = await fetch(`${APP}/phones`, { headers: { "x-wa-key": KEY }, signal: AbortSignal.timeout(60_000) });
+    const phones = r.ok ? (await r.json()).phones || [] : [];
+    for (let i = 0; i < phones.length; i += 50) {
+      const found = await entry.sock.onWhatsApp(...phones.slice(i, i + 50).map((p) => `${p}@s.whatsapp.net`)).catch(() => []);
+      remember(entry, (found || []).filter((f) => f.lid).map((f) => [f.lid, f.jid]));
+    }
+    log(entry.companyId, `números de perfil: ${phones.length}, con código de WhatsApp: ${entry.lids.size}`);
+  } catch (e) {
+    log(entry.companyId, "no pude leer los números de perfil", e?.message);
+  }
+}
+
 const contactPairs = (list) => (list || []).flatMap((c) => [[c.lid, c.id], [c.id, c.jid || c.phoneNumber]].filter(([a, b]) => a && b));
 
 async function start(companyId) {
@@ -91,7 +108,7 @@ async function start(companyId) {
   const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined }));
   const sock = makeWASocket({ auth: state, logger, version, browser: Browsers.ubuntu("GPS Link"), markOnlineOnConnect: false, syncFullHistory: false, shouldIgnoreJid: skip, placeholderResendCache: noPhoneResend });
   const saved = await readFile(path.join(dir, "lid-map.json"), "utf8").then(JSON.parse).catch(() => ({}));
-  const entry = { companyId, dir, sock, open: false, stopping: false, sentByBot: new Set(), queues: new Map(), paused: new Map(), lids: new Map(Object.entries(saved)) };
+  const entry = { companyId, dir, sock, open: false, stopping: false, sentByBot: new Set(), queues: new Map(), paused: new Map(), lids: new Map(Object.entries(saved)), learnedAt: 0 };
   sessions.set(companyId, entry);
   await update(companyId, { status: "CONNECTING", error: null });
   sock.ev.on("creds.update", saveCreds);
@@ -101,8 +118,7 @@ async function start(companyId) {
       entry.open = true;
       log(companyId, "conectado");
       await update(companyId, { qr: null, status: "CONNECTED", phone: digitsOf(sock.user?.id), error: null });
-      // First run with the LID map: replay the contact list from the phone so known contacts resolve to their number.
-      if (!entry.lids.size) setTimeout(() => sock.resyncAppState(ALL_WA_PATCH_NAMES, true).then(() => log(companyId, "contactos:", entry.lids.size)).catch((e) => log(companyId, "contactos error", e?.message)), 15_000);
+      setTimeout(() => learnLids(entry), 10_000);
     }
     if (u.connection === "close") {
       entry.open = false;
