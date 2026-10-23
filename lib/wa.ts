@@ -89,8 +89,21 @@ export async function linkPhone(companyId: string, phone: string, user: AiUser) 
   await prisma.waLink.upsert({ where: { companyId_phone: { companyId, phone } }, create: { companyId, phone, ...data }, update: data });
 }
 
+// Users whose phone matches: the track profile (GPSWOX) first, then the gpslinkusa.com company and client records.
+async function idsByPhone(phone: string): Promise<number[]> {
+  const tail = { endsWith: phone.slice(-7) };
+  const [track, companies, clients] = await Promise.all([
+    usersByPhone(phone).catch((): number[] => []),
+    prisma.company.findMany({ where: { phone: tail, gpswoxUserId: { not: null } }, select: { phone: true, gpswoxUserId: true } }),
+    prisma.endClient.findMany({ where: { phone: tail }, select: { phone: true, gpswoxUserId: true } }),
+  ]);
+  const saas = [...companies, ...clients].filter((r) => waNumber(r.phone) === phone).map((r) => r.gpswoxUserId as number);
+  return [...new Set([...track, ...saas])];
+}
+
 async function linkFromProfile(phone: string): Promise<boolean> {
-  const ids = await usersByPhone(phone).catch((): number[] => []);
+  if (phone.length < 8) return false;
+  const ids = await idsByPhone(phone).catch((): number[] => []);
   const link = await prisma.waLink.findUnique({ where: { companyId_phone: { companyId: OWNER_WA, phone } } });
   if (!ids.length) {
     if (link) await prisma.waLink.delete({ where: { id: link.id } });

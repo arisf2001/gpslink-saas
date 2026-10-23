@@ -34,11 +34,11 @@ async function ask(body) {
 async function handle(entry, m) {
   const { sock, companyId } = entry;
   const jid = m.key.remoteJid;
-  if ((entry.paused.get(jid) || 0) > Date.now()) return;
+  if ((entry.paused.get(jid) || 0) > Date.now()) return log(companyId, "chat en pausa (respuesta manual)");
   const x = contentOf(m);
   const text = x.conversation || x.extendedTextMessage?.text || x.imageMessage?.caption || "";
-  const phone = digitsOf(jid.endsWith("@lid") ? m.key.senderPn : jid);
-  if (!phone) return;
+  const phone = digitsOf(jid.endsWith("@lid") ? m.key.senderPn || m.key.participantPn : jid);
+  if (!phone) return log(companyId, "mensaje sin número", jid.split("@")[1]);
   await sock.readMessages([m.key]).catch(() => {});
   const note = x.audioMessage && Number(x.audioMessage.seconds || 0) <= 180 ? x.audioMessage : null;
   if (!text && !note) return;
@@ -57,6 +57,7 @@ async function handle(entry, m) {
     const r = await sock.sendMessage(jid, { text: res.reply });
     if (r?.key?.id) entry.sentByBot.add(r.key.id);
   }
+  log(companyId, `${note ? "voz" : "texto"} de ...${phone.slice(-4)}:`, res.audio ? "respondió con voz" : res.reply ? "respondió" : "sin respuesta");
   await sock.sendPresenceUpdate("paused", jid).catch(() => {});
 }
 
