@@ -1,11 +1,11 @@
 // GPS Link WhatsApp (QR) — pm2 app "gpslink-wa". One WhatsApp session per white label.
 // Wanted/actual state lives in WaSession; replies come from the app (/api/internal/wa); notices go out through WaOutbox.
-import { mkdir, rm } from "fs/promises";
+import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { createHmac } from "crypto";
 import path from "path";
 import pino from "pino";
 import { PrismaClient } from "@prisma/client";
-import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, useMultiFileAuthState as loadAuthState } from "@whiskeysockets/baileys";
+import makeWASocket, { ALL_WA_PATCH_NAMES, Browsers, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, useMultiFileAuthState as loadAuthState } from "@whiskeysockets/baileys";
 
 for (const f of [".env.production.local", ".env.local", ".env"]) {
   try { process.loadEnvFile(f); } catch {}
@@ -37,7 +37,9 @@ async function handle(entry, m) {
   if ((entry.paused.get(jid) || 0) > Date.now()) return log(companyId, "chat en pausa (respuesta manual)");
   const x = contentOf(m);
   const text = x.conversation || x.extendedTextMessage?.text || x.imageMessage?.caption || "";
-  const phone = digitsOf(jid.endsWith("@lid") ? m.key.senderPn || m.key.participantPn : jid);
+  const pn = m.key.senderPn || m.key.participantPn;
+  if (jid.endsWith("@lid") && pn) remember(entry, [[jid, pn]]);
+  const phone = digitsOf(jid.endsWith("@lid") ? pn || entry.lids.get(digitsOf(jid)) : jid);
   if (!phone) return log(companyId, "mensaje sin número", jid.split("@")[1]);
   await sock.readMessages([m.key]).catch(() => {});
   const note = x.audioMessage && Number(x.audioMessage.seconds || 0) <= 180 ? x.audioMessage : null;
@@ -67,13 +69,29 @@ function enqueue(entry, jid, fn) {
   entry.queues.set(jid, next);
 }
 
+// WhatsApp may hide the sender's number behind a LID: keep a LID -> phone map from contacts and messages that carry both.
+function remember(entry, pairs) {
+  let changed = false;
+  for (const [lid, pn] of pairs) {
+    const l = digitsOf(lid);
+    const p = digitsOf(pn);
+    if (!l || !p || !String(lid).endsWith("@lid") || !String(pn).endsWith("@s.whatsapp.net") || entry.lids.get(l) === p) continue;
+    entry.lids.set(l, p);
+    changed = true;
+  }
+  if (changed) writeFile(path.join(entry.dir, "lid-map.json"), JSON.stringify(Object.fromEntries(entry.lids)), { mode: 0o600 }).catch(() => {});
+}
+
+const contactPairs = (list) => (list || []).flatMap((c) => [[c.lid, c.id], [c.id, c.jid || c.phoneNumber]].filter(([a, b]) => a && b));
+
 async function start(companyId) {
   const dir = path.join(ROOT, companyId.replace(/[^a-z0-9]/gi, ""));
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const { state, saveCreds } = await loadAuthState(dir);
   const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined }));
   const sock = makeWASocket({ auth: state, logger, version, browser: Browsers.ubuntu("GPS Link"), markOnlineOnConnect: false, syncFullHistory: false, shouldIgnoreJid: skip, placeholderResendCache: noPhoneResend });
-  const entry = { companyId, dir, sock, open: false, stopping: false, sentByBot: new Set(), queues: new Map(), paused: new Map() };
+  const saved = await readFile(path.join(dir, "lid-map.json"), "utf8").then(JSON.parse).catch(() => ({}));
+  const entry = { companyId, dir, sock, open: false, stopping: false, sentByBot: new Set(), queues: new Map(), paused: new Map(), lids: new Map(Object.entries(saved)) };
   sessions.set(companyId, entry);
   await update(companyId, { status: "CONNECTING", error: null });
   sock.ev.on("creds.update", saveCreds);
@@ -83,6 +101,8 @@ async function start(companyId) {
       entry.open = true;
       log(companyId, "conectado");
       await update(companyId, { qr: null, status: "CONNECTED", phone: digitsOf(sock.user?.id), error: null });
+      // First run with the LID map: replay the contact list from the phone so known contacts resolve to their number.
+      if (!entry.lids.size) setTimeout(() => sock.resyncAppState(ALL_WA_PATCH_NAMES, true).then(() => log(companyId, "contactos:", entry.lids.size)).catch((e) => log(companyId, "contactos error", e?.message)), 15_000);
     }
     if (u.connection === "close") {
       entry.open = false;
@@ -98,6 +118,10 @@ async function start(companyId) {
       } else await update(companyId, { status: "CONNECTING" });
     }
   });
+  sock.ev.on("contacts.upsert", (list) => remember(entry, contactPairs(list)));
+  sock.ev.on("contacts.update", (list) => remember(entry, contactPairs(list)));
+  sock.ev.on("chats.phoneNumberShare", ({ lid, jid }) => remember(entry, [[lid, jid]]));
+  sock.ev.on("messaging-history.set", ({ contacts, chats }) => remember(entry, [...contactPairs(contacts), ...(chats || []).map((c) => [c.lidJid, c.id])]));
   sock.ev.on("messages.upsert", ({ messages, type }) => {
     if (type !== "notify") return;
     for (const m of messages) {
