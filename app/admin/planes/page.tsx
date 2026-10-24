@@ -8,7 +8,7 @@ import { getSession } from "@/lib/session";
 import { savePlanAction, saveTiersAction } from "../actions";
 import { saveActivationPricesAction } from "../activacion/actions";
 import { AdminShell } from "../admin-shell";
-import { dopRate } from "@/lib/lang";
+import { dopRate, showPublicPrices } from "@/lib/lang";
 import { saveCarrierAction } from "../sim/actions";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export default async function PlanesPage({ searchParams }: { searchParams: Promi
   await ensureDefaultPlans();
   const plans = await prisma.plan.findMany({ orderBy: [{ sortOrder: "asc" }, { devices: "asc" }] });
   const tiers = await prisma.priceTier.findMany({ orderBy: { minDevices: "asc" } });
-  const rate = await dopRate();
+  const [rate, showPrices] = await Promise.all([dopRate(), showPublicPrices()]);
   const [act, carriers, simCounts] = await Promise.all([
     activationSetting(),
     ensureCarriers(),
@@ -42,7 +42,7 @@ export default async function PlanesPage({ searchParams }: { searchParams: Promi
       {ok === "sim" && <div className="ok" style={{ marginBottom: 10 }}>Precios de SIM guardados.</div>}
       <div className="panel" id="marcas" style={{ marginBottom: 18, padding: 18 }}>
         <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 6 }}>1. Marcas blancas: precio por equipo al año (USD)</h2>
-        <p className="hint" style={{ marginBottom: 12 }}>El precio se escoge según cuántos equipos activos tiene la empresa el día de la factura. Si está en 0, la página muestra &quot;Consultar&quot;.</p>
+        <p className="hint" style={{ marginBottom: 12 }}>El precio se escoge según cuántos equipos activos tiene la empresa el día de la factura. Si está en 0, o si quitas «Mostrar precios», la página muestra &quot;Consultar precio&quot;.</p>
         <form action={saveTiersAction} className="row" style={{ alignItems: "flex-end" }}>
           {tiers.map((t, i) => (
             <label key={t.id} style={{ fontSize: 13 }}>{t.minDevices}{tiers[i + 1] ? ` a ${tiers[i + 1].minDevices - 1}` : " o más"} equipos
@@ -52,6 +52,7 @@ export default async function PlanesPage({ searchParams }: { searchParams: Promi
           <label style={{ fontSize: 13 }}>Tasa: 1 US$ = RD$
             <input name="dopRate" defaultValue={String(rate)} inputMode="decimal" style={{ width: 90 }} />
           </label>
+          <label className="row" style={{ fontSize: 13 }}><input type="checkbox" name="showPrices" defaultChecked={showPrices} style={{ width: "auto" }} /> Mostrar precios en gpslinkusa.com</label>
           <button className="btn sm">{ok === "tramos" ? "Guardado ✓" : "Guardar precios"}</button>
         </form>
       </div>

@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { prisma } from "./db";
+import { formatMoney } from "./format";
 
 export type Lang = "es" | "en";
 
@@ -11,8 +12,12 @@ export async function dopRate(): Promise<number> {
   return (await prisma.siteSetting.findUnique({ where: { id: 1 } }))?.dopRate ?? 60;
 }
 
+export async function showPublicPrices(): Promise<boolean> {
+  return (await prisma.siteSetting.findUnique({ where: { id: 1 } }))?.showPrices ?? true;
+}
+
 // Spanish shows RD$ (converted at the admin's rate, rounded to whole pesos); English shows US$.
 export function publicMoney(usdCents: number, lang: Lang, rate: number): string {
-  if (lang === "en") return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: usdCents % 100 === 0 ? 0 : 2 }).format(usdCents / 100);
-  return new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP", maximumFractionDigits: 0 }).format(Math.round((usdCents / 100) * rate));
+  if (lang === "en") return formatMoney(usdCents, "usd", "$");
+  return formatMoney(Math.round((usdCents / 100) * rate) * 100, "dop");
 }

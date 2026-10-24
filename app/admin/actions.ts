@@ -55,7 +55,8 @@ export async function saveTiersAction(formData: FormData) {
   }
   const rate = Number(String(formData.get("dopRate") ?? "").replace(",", "."));
   if (!Number.isFinite(rate) || rate <= 0 || rate > 1000) redirect("/admin/planes?error=tasa");
-  await prisma.siteSetting.upsert({ where: { id: 1 }, create: { id: 1, dopRate: rate }, update: { dopRate: rate } });
+  const showPrices = formData.get("showPrices") === "on";
+  await prisma.siteSetting.upsert({ where: { id: 1 }, create: { id: 1, dopRate: rate, showPrices }, update: { dopRate: rate, showPrices } });
   revalidatePath("/");
   redirect("/admin/planes?ok=tramos");
 }

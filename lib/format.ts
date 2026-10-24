@@ -1,5 +1,10 @@
-export function formatMoney(cents: number, currency = "usd"): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase(), maximumFractionDigits: cents % 100 === 0 ? 0 : 2 }).format(cents / 100);
+const MONEY_PREFIX: Record<string, string> = { usd: "US$", dop: "RD$" };
+
+// Always x,xxx.xx: RD$33,000.00 / US$2,750.00.
+export function formatMoney(cents: number, currency = "usd", prefix?: string): string {
+  const cur = currency.toLowerCase();
+  const n = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(cents) / 100);
+  return `${cents < 0 ? "-" : ""}${prefix ?? MONEY_PREFIX[cur] ?? `${cur.toUpperCase()} `}${n}`;
 }
 
 export function formatDate(date: Date | null | undefined): string {

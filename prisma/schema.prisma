@@ -597,7 +597,8 @@ model DeviceActivation {
 // Public site settings (gpslinkusa.com): Spanish shows prices in RD$ at this rate.
 model SiteSetting {
   id      Int   @id @default(1)
-  dopRate Float @default(60)
+  dopRate    Float   @default(60)
+  showPrices Boolean @default(true)
 }
 
 // Extra admins (employees) of a white label: same account, own login; only the owner manages them and the card.

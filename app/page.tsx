@@ -1,7 +1,7 @@
 import { trackerUrl } from "@/lib/config";
 import Link from "next/link";
 import { Fragment } from "react";
-import { dopRate, getLang } from "@/lib/lang";
+import { dopRate, getLang, showPublicPrices } from "@/lib/lang";
 import { prisma } from "@/lib/db";
 import { TRIAL_DAYS } from "@/lib/config";
 import { ensureDefaultPlans } from "@/lib/plans";
@@ -65,7 +65,7 @@ export default async function Home() {
   const tierRows = await prisma.priceTier.findMany({ orderBy: { minDevices: "asc" } });
   const tiers: PublicTier[] = tierRows.map((t, i) => ({ id: t.id, minDevices: t.minDevices, maxDevices: tierRows[i + 1] ? tierRows[i + 1].minDevices - 1 : null, priceCents: t.priceCents, currency: t.currency }));
   const months = Math.round(TRIAL_DAYS / 30);
-  const [lang, rate] = await Promise.all([getLang(), dopRate()]);
+  const [lang, rate, showPrices] = await Promise.all([getLang(), dopRate(), showPublicPrices()]);
   const t = T[lang];
 
   return (
@@ -103,7 +103,7 @@ export default async function Home() {
         <div className="wrap">
           <h2>{t.plans}</h2>
           <div className="sub">{t.plansSub}</div>
-          <PricingTiers tiers={tiers} trialMonths={months} lang={lang} rate={rate} />
+          <PricingTiers tiers={tiers} trialMonths={months} lang={lang} rate={rate} showPrices={showPrices} />
         </div>
       </section>
 
