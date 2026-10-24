@@ -43,6 +43,7 @@ export async function SiteNav({ path }: { path?: string } = {}) {
           GPS LINK
         </Link>
         <div className="links">
+          <Link href="/#ia" className="hide-m">{en ? "AI assistant" : "Asistente IA"}</Link>
           <Link href="/#funciones" className="hide-m">{en ? "Features" : "Funciones"}</Link>
           <Link href="/#como-funciona" className="hide-m">{en ? "How it works" : "Cómo funciona"}</Link>
           <Link href="/#planes" className="hide-m">{en ? "Plans" : "Planes"}</Link>
