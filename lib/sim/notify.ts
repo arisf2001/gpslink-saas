@@ -5,6 +5,7 @@ import { prisma } from "../db";
 import { BRAND, appUrl } from "../config";
 import { formatDate, formatMoney } from "../format";
 import { emailHtml, sendEmail, type ChannelResult } from "../notify";
+import { pushAdmin } from "../push";
 import { daysLeft, DAY, MONTHLY_CARRIERS, NEWSIM, ONCE, possibleSwap, statusLabel, SWAP_DAYS } from "./carriers";
 import { lastSignals } from "../gpswox";
 import { fillDeviceProfiles, refreshOnceQuota, syncNewsim, syncOnce, syncSims } from "./sync";
@@ -245,6 +246,7 @@ export async function runLowDataNotices() {
     } catch {}
   }
   if (!fresh.length) return 0;
+  await pushAdmin({ title: `${fresh.length} SIM con pocos datos`, body: fresh.slice(0, 5).map((c) => c.nickname ?? c.deviceName ?? c.iccid).join(", "), url: "/admin/sim?f=todas" });
   const left = (c: SimCard) => `${Math.max(0, c.totalMb - c.usedMb).toFixed(1)} MB de ${c.totalMb} MB (${Math.round(((c.totalMb - c.usedMb) / c.totalMb) * 100)} %)`;
   await sendEmail(
     reportTo(),
@@ -274,6 +276,7 @@ export async function runSwapNotices(now = new Date()) {
     } catch {}
   }
   if (!fresh.length) return 0;
+  await pushAdmin({ title: `${fresh.length} equipo(s) con posible cambio de SIM`, body: fresh.slice(0, 5).map((x) => x.card.deviceName ?? x.card.iccid).join(", "), url: "/admin/sim?f=revisar" });
   await sendEmail(
     reportTo(),
     `${fresh.length} equipo(s) con posible cambio de SIM`,
@@ -313,6 +316,7 @@ export async function applySimCheckout(session: Stripe.Checkout.Session) {
   const paid = await prisma.simRenewal.update({ where: { id: renewal.id }, data: { status: "PAID", paidAt: new Date(), stripeSession: session.id } });
   const card = await prisma.simCard.findUnique({ where: { iccid: renewal.iccid } });
   await prisma.simEvent.create({ data: { iccid: renewal.iccid, kind: "paid", detail: `Pagó ${formatMoney(renewal.amountCents, renewal.currency)} por Stripe` } });
+  await pushAdmin({ title: "SIM pagada: reactivar", body: `${renewal.iccid}${card?.deviceName ? ` · ${card.deviceName}` : ""} · ${formatMoney(renewal.amountCents, renewal.currency)}`, url: "/admin/sim?f=pagadas" });
   await sendEmail(reportTo(), `SIM pagada: reactivar ${renewal.iccid}`, emailHtml("Una SIM fue pagada", [`ICCID ${renewal.iccid}${card?.deviceName ? ` · ${card.deviceName}` : ""}.`, `Monto: ${formatMoney(renewal.amountCents, renewal.currency)}.`, "Renueva el plan en el panel del proveedor y márcala como reactivada."], { label: "Abrir Tarjetas SIM", url: `${appUrl()}/admin/sim?f=pagadas` }));
   if (card) await noticeOnce(card.iccid, "paid", `${renewal.id}:paid`, () => toClient(card, "Recibimos tu pago de la SIM", "¡Gracias! Recibimos tu pago", [`Pago de ${formatMoney(renewal.amountCents, renewal.currency)} para la SIM ${vehicle(card)}.`, "La reactivación puede tardar hasta 5 días laborables. Te avisamos cuando esté lista."]));
   return paid;

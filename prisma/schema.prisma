@@ -690,3 +690,16 @@ model SiriKey {
   lastUsedAt     DateTime?
   createdAt      DateTime  @default(now())
 }
+
+// Browser push subscription (installed app on a PC): scope "admin" = owner panel, "track" = a GPSWOX user's vehicle alerts.
+model PushSub {
+  id           String   @id @default(cuid())
+  endpoint     String   @unique @db.VarChar(700)
+  p256dh       String   @db.VarChar(200)
+  auth         String   @db.VarChar(100)
+  scope        String   @db.VarChar(10)
+  gpswoxUserId Int?
+  origin       String?  @db.VarChar(200)
+  createdAt    DateTime @default(now())
+  @@index([scope, gpswoxUserId])
+}

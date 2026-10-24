@@ -3,6 +3,7 @@ import { BRAND } from "./config";
 import { prisma } from "./db";
 import { isMock, withGpswoxDb } from "./gpswox";
 import { emailHtml, sendEmail, sendWhatsApp, type ChannelResult } from "./notify";
+import { pushTrackUser } from "./push";
 import { DIRECT_WA, queueWa } from "./wa";
 
 // Catalog of notifications the platform can deliver and, per notification, who gets it and by which channel.
@@ -71,6 +72,10 @@ export async function notify(kind: string, aud: Audience, msg: Message, opts: { 
   const rule = (opts.rules ?? (await notificationRules())).get(kind);
   if (!rule) return [];
   const done = opts.done ?? new Set<string>();
+  if (aud.gpswoxUserId && NOTIFICATIONS.find((n) => n.key === kind)?.group === "vehiculo" && !done.has(`push:${aud.gpswoxUserId}`)) {
+    done.add(`push:${aud.gpswoxUserId}`);
+    await pushTrackUser(aud.gpswoxUserId, pushText(msg, kind));
+  }
   const company = aud.companyId ? await prisma.company.findUnique({ where: { id: aud.companyId } }) : null;
   const brand = company && company.status !== "CANCELED" ? company : null;
   const from = { name: brand?.name ?? BRAND.name, contact: brand?.email ?? BRAND.supportEmail };
@@ -100,6 +105,11 @@ export async function notify(kind: string, aud: Audience, msg: Message, opts: { 
   if (brand && rule.brandWa && brand.phone) await send(`wa:${brand.phone}`, () => viaBrand(brand.id, brand.phone, true));
   if (brand && rule.brandEmail && brand.email) await send(`em:${brand.email.toLowerCase()}`, () => email(brand.email));
   return results;
+}
+
+// Desktop notification: the subject already names the alert and the vehicle; the rest goes in the body.
+function pushText(msg: Message, tag: string) {
+  return { title: msg.subject, body: msg.lines.slice(1).join("\n") || msg.lines[0] || "", tag: `${tag}:${msg.subject}` };
 }
 
 const EVENT_TITLE: Record<string, string> = {
@@ -203,7 +213,11 @@ export async function runEventNotifications(): Promise<{ read: number; sent: num
   for (const e of events) {
     out.read++;
     const kind = kindForEvent(e.type);
-    if (!kind || e.groupId === 1) continue;
+    if (!kind) continue;
+    if (e.groupId === 1) {
+      await pushTrackUser(e.userId, pushText(eventMessage(e, BRAND.name), kind));
+      continue;
+    }
     const company = billed.find((b) => b.deviceId === e.deviceId)?.company ?? null;
     const brand = company && company.status !== "CANCELED" ? company : null;
     const res = await notify(kind, { gpswoxUserId: e.userId, email: e.email, companyId: brand?.id ?? null }, eventMessage(e, brand?.name ?? BRAND.name), { rules });

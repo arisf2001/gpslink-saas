@@ -10,6 +10,7 @@ import { login as platformLogin, userInfo } from "./ai/gps";
 import { runClientLifecycle } from "./clients";
 import { plusOneYear, reminderDayFor } from "./lifecycle";
 import { emailHtml, sendEmail, sendWhatsApp, type ChannelResult } from "./notify";
+import { pushAdmin } from "./push";
 import { getStripe } from "./stripe";
 
 export type CompanyWithPlan = Company & { plan: Plan };
@@ -58,6 +59,7 @@ export async function registerCompany(input: RegisterInput, now = new Date()): P
     },
     include: { plan: true },
   });
+  await pushAdmin({ title: "Empresa nueva registrada", body: `${company.name} (${company.contactName}) · ${plan.name}`, url: `/admin/empresa/${company.id}` });
 
   await notifyOnce(company, "welcome", `${company.id}:welcome`, {
     subject: `Bienvenido a GPS Link: tienes ${TRIAL_DAYS} días gratis`,
@@ -251,6 +253,7 @@ export async function chargeSavedCard(invoiceId: string, opts: { notify?: boolea
   } catch (e) {
     const msg = (e as { raw?: { message?: string }; message?: string }).raw?.message ?? (e as Error).message;
     console.error(`[factura] cobro con tarjeta ${invoice.id}:`, msg);
+    await pushAdmin({ title: "Cobro con tarjeta rechazado", body: `${company.name} · ${formatMoney(invoice.amountCents, invoice.currency)} · ${msg || "rechazada"}`, url: `/admin/empresa/${company.id}` });
     return { ok: false, error: msg || "la tarjeta fue rechazada" };
   }
 }
@@ -261,6 +264,7 @@ export async function markInvoicePaid(invoiceId: string, payment: { method: stri
   if (invoice.status === "PAID") return invoice;
   const paid = await prisma.invoice.update({ where: { id: invoiceId }, data: { status: "PAID", paidAt: now, ...payment } });
   const company = invoice.company;
+  await pushAdmin({ title: "Pago recibido", body: `${company.name} · ${formatMoney(invoice.amountCents, invoice.currency)} · ${payment.method}`, url: `/admin/empresa/${company.id}` });
   if (company.status === "BLOCKED" && !(await prisma.invoice.count({ where: { companyId: company.id, status: "OPEN", dueAt: { lte: now } } }))) {
     if (company.gpswoxUserId) await setResellerActive(company.email, true);
     await prisma.company.update({ where: { id: company.id }, data: { status: "ACTIVE" } });
@@ -278,6 +282,7 @@ export async function blockCompany(company: Company, reason: "unpaid" | "manual"
   if (company.gpswoxUserId) await setResellerActive(company.email, false);
   await prisma.company.update({ where: { id: company.id }, data: { status: "BLOCKED" } });
   if (reason === "unpaid") {
+    await pushAdmin({ title: "Cuenta bloqueada por falta de pago", body: company.name, url: `/admin/empresa/${company.id}` });
     await notifyOnce(company, "blocked", `${company.id}:blocked:${new Date().toISOString().slice(0, 10)}`, {
       subject: "Tu plataforma GPS Link fue bloqueada por falta de pago",
       title: "Tu plataforma está bloqueada",

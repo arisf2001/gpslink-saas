@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { vapidPublicKey } from "@/lib/push";
 import { adminLogoutAction } from "./actions";
+import { PushButton } from "./push-button";
 
 export async function AdminShell({ children }: { children: React.ReactNode }) {
   const openTickets = await prisma.supportTicket.count({ where: { status: "abierto" } });
@@ -22,6 +24,7 @@ export async function AdminShell({ children }: { children: React.ReactNode }) {
             <Link href="/admin/ia">Asistente IA</Link>
             <Link href="/admin/whatsapp">WhatsApp</Link>
             <Link href="/admin/tickets">Tickets{openTickets ? ` (${openTickets})` : ""}</Link>
+            <PushButton publicKey={vapidPublicKey()} />
             <form action={adminLogoutAction}><button className="btn sm s">Salir</button></form>
           </div>
         </div>

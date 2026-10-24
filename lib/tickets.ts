@@ -1,4 +1,5 @@
 import type { Company, SupportTicket } from "@prisma/client";
+import { pushAdmin } from "./push";
 import { brandHasOwnLogin } from "./brand-host";
 import { BRAND, appUrl } from "./config";
 import { prisma } from "./db";
@@ -37,6 +38,7 @@ async function tellAdmin(company: BrandCompany, ticket: SupportTicket, author: A
   const subject = `${isNew ? "Ticket nuevo" : "Respuesta en ticket"} de ${company.name}: ${ticket.subject}`;
   const html = emailHtml(subject, [`${author.name} escribió:`, body, ticket.device ? `Vehículo: ${ticket.device}` : ""].filter(Boolean), { label: "Ver ticket", url: `${appUrl()}/admin/tickets/${ticket.id}` });
   await sendEmail(BRAND.supportEmail, subject, html, { replyTo: author.email ?? company.email }).catch(() => null);
+  await pushAdmin({ title: subject, body: `${author.name}: ${body.slice(0, 180)}`, url: `/admin/tickets/${ticket.id}`, tag: `ticket:${ticket.id}` });
 }
 
 export async function createTicket(company: BrandCompany, author: Author, input: TicketInput & { subject: string; device: string }): Promise<string> {
