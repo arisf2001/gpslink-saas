@@ -20,8 +20,16 @@ export default async function EntrarPage({ searchParams }: { searchParams: Promi
   return (
     <>
       <SiteNav path="/entrar" />
-      <main className="wrap" style={{ maxWidth: 420, padding: "50px 20px" }}>
-        <TrackLoginForm lang={lang} initialError={err && lang === "en" ? toEnglish(err) : err} googleUrl={`${trackerUrl()}/google/login`} />
+      <main className="entrar">
+        <video className="entrar-v" autoPlay muted loop playsInline preload="auto" poster="/hero.jpg" aria-hidden="true">
+          <source src="/hero-m.mp4" type="video/mp4" media="(max-width: 900px)" />
+          <source src="/hero.mp4" type="video/mp4" />
+        </video>
+        <div className="entrar-card">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-gpslink.png" alt="GPS Link" className="entrar-logo" />
+          <TrackLoginForm lang={lang} initialError={err && lang === "en" ? toEnglish(err) : err} googleUrl={`${trackerUrl()}/google/login`} />
+        </div>
       </main>
     </>
   );
