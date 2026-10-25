@@ -1,0 +1,117 @@
+import { verifyPin, type AiUser } from "./ai/assistant";
+import { sendLocationWhatsApp } from "./ai/engine";
+import * as gps from "./ai/gps";
+import { prisma } from "./db";
+import { deviceStatuses, type DeviceStatus } from "./device-status";
+import { revokeByAccess } from "./oauth";
+
+// Google Home cloud-to-cloud integration: each vehicle is a security panel (armed = engine blocked, PIN required),
+// with query-only ignition (OnOff) and GPS battery (EnergyStorage) for routines. Google Home has no GPS location trait:
+// "Where is X?" (Locator) sends the location to the customer's own WhatsApp instead.
+type Input = { intent: string; payload?: { devices?: { id: string }[]; commands?: { devices: { id: string }[]; execution: { command: string; params?: { arm?: boolean; silence?: boolean; lang?: string }; challenge?: { pin?: string } }[] }[] } };
+export type SmartHomeRequest = { requestId: string; inputs: Input[] };
+
+const PANEL = "action.devices.types.SECURITYSYSTEM";
+const TRAITS = ["action.devices.traits.ArmDisarm", "action.devices.traits.OnOff", "action.devices.traits.EnergyStorage", "action.devices.traits.Locator"];
+
+export function deviceFor(v: Pick<gps.Vehicle, "id" | "name" | "plate">) {
+  return {
+    id: String(v.id),
+    type: PANEL,
+    traits: TRAITS,
+    name: { name: v.name.trim(), ...(v.plate ? { nicknames: [v.plate] } : {}) },
+    willReportState: false,
+    attributes: { queryOnlyOnOff: true, queryOnlyEnergyStorage: true, isRechargeable: false },
+    deviceInfo: { manufacturer: "GPS Link", model: "GPS" },
+  };
+}
+
+export function stateFor(v: Pick<gps.Vehicle, "online" | "engine">, s: Pick<DeviceStatus, "battery" | "blocked"> | undefined) {
+  const battery = s?.battery ?? null;
+  return {
+    online: v.online !== "offline",
+    status: "SUCCESS",
+    isArmed: s?.blocked === true,
+    on: v.engine === true,
+    ...(battery === null
+      ? {}
+      : { capacityRemaining: [{ rawValue: Math.round(battery), unit: "PERCENTAGE" }], descriptiveCapacityRemaining: battery < 15 ? "CRITICALLY_LOW" : battery < 35 ? "LOW" : battery < 70 ? "MEDIUM" : battery < 95 ? "HIGH" : "FULL" }),
+  };
+}
+
+export const groupKey = (g: string | null | undefined) => (g ?? "").trim().toLowerCase();
+
+// Groups (lowercase titles, "" = ungrouped) the user chose for Google Home; null = every vehicle.
+// The owner's admin user sees every client's device, so by default he only gets his personal group.
+export async function homeGroups(userId: number, isAdmin: boolean): Promise<string[] | null> {
+  const row = await prisma.googleHomeGroups.findUnique({ where: { gpswoxUserId: userId } });
+  if (row) return JSON.parse(row.groups) as string[];
+  return isAdmin ? [groupKey(process.env.GOOGLE_HOME_ADMIN_GROUP || "Familia")] : null;
+}
+
+export async function setHomeGroups(userId: number, groups: string[]) {
+  const value = JSON.stringify([...new Set(groups.map(groupKey))]);
+  await prisma.googleHomeGroups.upsert({ where: { gpswoxUserId: userId }, create: { gpswoxUserId: userId, groups: value }, update: { groups: value } });
+}
+
+export async function smartHome(req: SmartHomeRequest, user: AiUser, accessToken: string): Promise<Record<string, unknown>> {
+  const input = req.inputs?.[0];
+  const intent = input?.intent ?? "";
+  if (intent === "action.devices.DISCONNECT") {
+    await revokeByAccess(accessToken);
+    return {};
+  }
+  let fleet = await gps.vehicles(user.hash);
+  const groups = await homeGroups(user.userId, (await gps.userInfo(user.hash)).groupId === 1);
+  if (groups) fleet = fleet.filter((v) => groups.includes(groupKey(v.group)));
+  const mine = new Map(fleet.map((v) => [String(v.id), v]));
+  if (intent === "action.devices.SYNC") {
+    return { requestId: req.requestId, payload: { agentUserId: String(user.userId), devices: fleet.map(deviceFor) } };
+  }
+  if (intent === "action.devices.QUERY") {
+    const ids = (input?.payload?.devices ?? []).map((d) => d.id).filter((id) => mine.has(id));
+    const statuses = new Map((await deviceStatuses(ids.map(Number)).catch(() => [])).map((s) => [String(s.deviceId), s]));
+    const devices: Record<string, unknown> = {};
+    for (const d of input?.payload?.devices ?? []) {
+      const v = mine.get(d.id);
+      devices[d.id] = v ? stateFor(v, statuses.get(d.id)) : { status: "ERROR", errorCode: "deviceNotFound" };
+    }
+    return { requestId: req.requestId, payload: { devices } };
+  }
+  if (intent === "action.devices.EXECUTE") {
+    const commands: Record<string, unknown>[] = [];
+    for (const cmd of input?.payload?.commands ?? []) {
+      for (const ex of cmd.execution) {
+        for (const { id } of cmd.devices) {
+          const v = mine.get(id);
+          if (!v) { commands.push({ ids: [id], status: "ERROR", errorCode: "deviceNotFound" }); continue; }
+          if (ex.command === "action.devices.commands.Locate") {
+            if (ex.params?.silence) { commands.push({ ids: [id], status: "SUCCESS" }); continue; }
+            const sent = await sendLocationWhatsApp(user, v, ex.params?.lang?.startsWith("en") ? "en" : "es").catch(() => ({ error: "send failed" }));
+            commands.push("status" in sent ? { ids: [id], status: "SUCCESS", states: { generatedAlert: true } } : { ids: [id], status: "ERROR", errorCode: "transientError" });
+            continue;
+          }
+          if (ex.command !== "action.devices.commands.ArmDisarm") { commands.push({ ids: [id], status: "ERROR", errorCode: "functionNotSupported" }); continue; }
+          const lock = ex.params?.arm === true;
+          const pin = ex.challenge?.pin;
+          if (!pin) { commands.push({ ids: [id], status: "ERROR", errorCode: "challengeNeeded", challengeNeeded: { type: "pinNeeded" } }); continue; }
+          const check = await verifyPin(user.userId, String(pin));
+          if (check === "none") { commands.push({ ids: [id], status: "ERROR", errorCode: "authFailure" }); continue; }
+          if (check === "locked") { commands.push({ ids: [id], status: "ERROR", errorCode: "tooManyFailedAttempts" }); continue; }
+          if (check === "wrong") { commands.push({ ids: [id], status: "ERROR", errorCode: "challengeNeeded", challengeNeeded: { type: "challengeFailedPinNeeded" } }); continue; }
+          const command: gps.EngineCommand = lock ? "engine_stop" : "engine_resume";
+          let result: { ok: boolean; error?: string };
+          try {
+            result = (await gps.supportsCommand(user.hash, v.id, command)) ? await gps.sendCommand(user.hash, v.id, command) : { ok: false, error: "not supported" };
+          } catch (e) {
+            result = { ok: false, error: e instanceof Error ? e.message : String(e) };
+          }
+          await prisma.aiCommandLog.create({ data: { gpswoxUserId: user.userId, companyId: user.company?.id ?? null, deviceId: v.id, deviceName: v.name, command, channel: "google", ok: result.ok, error: result.error ?? null } });
+          commands.push(result.ok ? { ids: [id], status: "SUCCESS", states: { isArmed: lock, online: true } } : { ids: [id], status: "ERROR", errorCode: result.error === "not supported" ? "functionNotSupported" : "transientError" });
+        }
+      }
+    }
+    return { requestId: req.requestId, payload: { commands } };
+  }
+  return { requestId: req.requestId, payload: { errorCode: "notSupported" } };
+}
