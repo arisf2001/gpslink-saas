@@ -6,6 +6,13 @@ export const PACKAGE_SIZES = [50, 100, 300, 400, 500, 1000] as const;
 
 export const DEFAULT_TIERS = [1, 26, 51, 101];
 
+// Device limits offered at signup; if the owner hid all of them, offer all so signup never breaks.
+export async function signupPlans() {
+  const order = [{ sortOrder: "asc" as const }, { devices: "asc" as const }];
+  const visible = await prisma.plan.findMany({ where: { active: true }, orderBy: order });
+  return visible.length ? visible : prisma.plan.findMany({ orderBy: order });
+}
+
 export const DEFAULT_FEATURES = [
   "Plataforma web con tu marca, gratis",
   "App móvil con tu marca, gratis",

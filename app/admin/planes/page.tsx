@@ -96,6 +96,7 @@ export default async function PlanesPage({ searchParams }: { searchParams: Promi
       <div className="panel" style={{ padding: 18 }}>
         <h2 style={{ fontSize: 18, textAlign: "left", marginBottom: 6 }}>Límites de equipos al registrarse (marcas blancas)</h2>
         <p className="hint" style={{ marginBottom: 12 }}>La empresa elige uno al registrarse; es la cantidad máxima de equipos que puede subir. Tú lo puedes subir después desde la empresa.</p>
+        {plans.length > 0 && plans.every((p) => !p.active) && <p className="err" style={{ marginBottom: 12 }}>Ninguno está marcado como visible, así que en el registro salen todos. Marca «Visible» en los que quieras ofrecer.</p>}
         <table className="t">
           <thead><tr><th>Equipos</th><th>Nombre · visible · destacado</th></tr></thead>
           <tbody>

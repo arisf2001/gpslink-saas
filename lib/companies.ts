@@ -5,6 +5,7 @@ import { prisma } from "./db";
 import { DAY_MS, RESELLER_OPEN_DAYS, TRIAL_DAYS, appUrl } from "./config";
 import { closedPeriod, devicesToBill, unitPrice } from "./billing";
 import { formatDate, formatMoney } from "./format";
+import { signupPlans } from "./plans";
 import { brandChain, createReseller, deviceList, resellerLoginUrl, setResellerActive, updateReseller, userIdByEmail } from "./gpswox";
 import { login as platformLogin, userInfo } from "./ai/gps";
 import { runClientLifecycle } from "./clients";
@@ -28,7 +29,7 @@ export type RegisterInput = {
 export class RegistrationError extends Error {}
 
 export async function registerCompany(input: RegisterInput, now = new Date()): Promise<CompanyWithPlan> {
-  const plan = await prisma.plan.findFirst({ where: { id: input.planId, active: true } });
+  const plan = (await signupPlans()).find((p) => p.id === input.planId);
   if (!plan) throw new RegistrationError("Ese paquete no está disponible.");
   if (await prisma.company.findUnique({ where: { email: input.email } })) throw new RegistrationError("Ya existe una cuenta con ese correo.");
   if (await prisma.company.findUnique({ where: { slug: input.slug } })) throw new RegistrationError("Ese código de empresa ya está en uso. Elige otro.");
@@ -99,7 +100,7 @@ export async function verifyResellerLogin(email: string, password: string): Prom
   const linked = (await prisma.company.findFirst({ where: { gpswoxUserId: userId } })) ?? (await prisma.company.findUnique({ where: { email: info.email } }));
   if (linked) return linked.gpswoxUserId === userId ? linked : null;
   if (!(await brandChain(userId))[0]?.reseller) return "not_reseller";
-  const plan = await prisma.plan.findFirst({ where: { active: true }, orderBy: { devices: "asc" } });
+  const plan = (await signupPlans()).sort((a, b) => a.devices - b.devices)[0];
   if (!plan) return null;
   const base = info.email.split("@")[0].toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30) || "marca";
   let slug = base;

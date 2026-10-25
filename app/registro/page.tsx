@@ -1,7 +1,6 @@
-import { prisma } from "@/lib/db";
 import { TRIAL_DAYS } from "@/lib/config";
 
-import { ensureDefaultPlans } from "@/lib/plans";
+import { ensureDefaultPlans, signupPlans } from "@/lib/plans";
 import { SiteNav } from "../site-nav";
 import { RegisterForm } from "./register-form";
 import { getLang } from "@/lib/lang";
@@ -13,7 +12,7 @@ export default async function RegistroPage({ searchParams }: { searchParams: Pro
   await ensureDefaultPlans();
   const lang = await getLang();
   const en = lang === "en";
-  const plans = await prisma.plan.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { devices: "asc" }] });
+  const plans = await signupPlans();
   const options = plans.map((p) => ({
     id: p.id,
     label: en ? `Up to ${p.devices} devices` : `Hasta ${p.devices} equipos`,

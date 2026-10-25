@@ -8,6 +8,7 @@ import { BRAND } from "@/lib/config";
 import { prisma } from "@/lib/db";
 import { RegistrationError, registerCompany } from "@/lib/companies";
 import { emailHtml, sendEmail } from "@/lib/notify";
+import { signupPlans } from "@/lib/plans";
 import { setSession } from "@/lib/session";
 import { CODE_TTL_MS, MAX_ATTEMPTS, MAX_RESENDS, codeMatches, hashCode, newCode, openPayload, sealPayload } from "@/lib/signup-verify";
 import { emailError, normalizeSlug, passwordError, phoneDigits, slugError } from "@/lib/validation";
@@ -58,7 +59,7 @@ async function registerActionEs(_prev: RegisterState, formData: FormData): Promi
   const ip = await clientIp();
   if (rateLimit(`registro:${ip}`, 5, 10 * 60_000) > 0 || rateLimit(`registro:${values.email}`, 3, 10 * 60_000) > 0) return { error: TOO_MANY, values };
 
-  if (!(await prisma.plan.findFirst({ where: { id: values.planId, active: true } }))) return { error: "Ese paquete no está disponible.", values };
+  if (!(await signupPlans()).some((p) => p.id === values.planId)) return { error: "Ese paquete no está disponible.", values };
   if (await prisma.company.findUnique({ where: { email: values.email } })) return { error: "Ya existe una cuenta con ese correo.", values };
   if (await prisma.company.findUnique({ where: { slug } })) return { error: "Ese código de empresa ya está en uso. Elige otro.", values };
 
