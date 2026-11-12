@@ -1,0 +1,54 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "g. p. s. link",
+      "intents": [
+        {
+          "name": "PreguntaIntent",
+          "slots": [
+            {
+              "name": "pregunta",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "where is {pregunta}",
+            "where's {pregunta}",
+            "how much battery does {pregunta} have",
+            "what is the battery of {pregunta}",
+            "how is {pregunta}",
+            "is {pregunta} on",
+            "how fast is {pregunta} going",
+            "what speed is {pregunta}",
+            "how far did {pregunta} drive",
+            "where did {pregunta} go",
+            "ask {pregunta}",
+            "tell me {pregunta}",
+            "find {pregunta}"
+          ]
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        }
+      ],
+      "types": []
+    }
+  }
+}
