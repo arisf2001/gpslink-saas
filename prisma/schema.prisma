@@ -70,6 +70,7 @@ model Company {
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
   invoices             Invoice[]
+  manualInvoices       ManualInvoice[]
   notifications        Notification[]
   devices              BilledDevice[]
   aiEnabled            Boolean        @default(false)
@@ -703,4 +704,27 @@ model PushSub {
   origin       String?  @db.VarChar(200)
   createdAt    DateTime @default(now())
   @@index([scope, gpswoxUserId])
+}
+
+// Free-form invoices created by the owner in /admin/facturas and paid through a public link (/factura/<token>).
+model ManualInvoice {
+  id         String    @id @default(cuid())
+  number     Int       @unique
+  token      String    @unique
+  companyId  String?
+  company    Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  name       String
+  email      String
+  phone      String?
+  currency   String    @default("usd")
+  items      Json
+  totalCents Int
+  dueAt      DateTime
+  note       String?   @db.Text
+  status     String    @default("OPEN")
+  sentAt     DateTime?
+  paidAt     DateTime?
+  method     String?
+  reference  String?
+  createdAt  DateTime  @default(now())
 }

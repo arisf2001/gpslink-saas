@@ -1,3 +1,4 @@
+import { applyManualInvoiceCheckout } from "./manual-invoices";
 import type Stripe from "stripe";
 import { prisma } from "./db";
 import { markInvoicePaid } from "./companies";
@@ -8,6 +9,7 @@ import { applyCompanyCardCheckout } from "./company-card";
 // Shared by the webhook and the success redirect; markInvoicePaid is idempotent on the session id.
 export async function applyCheckoutSession(session: Stripe.Checkout.Session) {
   if (session.metadata?.kind === "sim") return applySimCheckout(session);
+  if (session.metadata?.kind === "manual_invoice") return applyManualInvoiceCheckout(session);
   if (session.metadata?.kind === "activation") return applyActivationCheckout(session);
   if (session.metadata?.kind === "company_card") return applyCompanyCardCheckout(session);
   const { companyId, invoiceId } = session.metadata ?? {};

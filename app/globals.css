@@ -141,3 +141,4 @@ table.t input{font:inherit;padding:6px 8px;border:1.5px solid #d1d5db;border-rad
 .entrar .trackbox .btn.google{margin-top:2px}
 @media(max-width:520px){.entrar{padding:20px 12px}.entrar-card{padding:22px 22px 24px}.entrar-logo{height:92px}}
 @media (prefers-reduced-motion:reduce){.entrar-v{display:none}}
+@media print{.no-print,nav,header{display:none!important}.factura{margin:0!important}}

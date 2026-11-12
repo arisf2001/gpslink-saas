@@ -18,6 +18,7 @@ export async function AdminShell({ children }: { children: React.ReactNode }) {
           <div className="admin-nav">
             <Link href="/admin">Empresas</Link>
             <Link href="/admin/planes">Precios</Link>
+            <Link href="/admin/facturas">Facturas</Link>
             <Link href="/admin/equipos">Equipos</Link>
             <Link href="/admin/sim">Tarjetas SIM</Link>
             <Link href="/admin/activacion">Activación</Link>
