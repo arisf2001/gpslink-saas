@@ -5,6 +5,7 @@ import { runActivations } from "./activation";
 import { runEventNotifications } from "./notifications";
 import { runBorderZones } from "./border-zones";
 import { runRedZones } from "./red-zones";
+import { syncGhlInvoices } from "./manual-invoices";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -37,6 +38,12 @@ export function startLifecycleScheduler() {
     runRedZones()
       .then((s) => (s.notices || s.cuts) && console.log("[zonas-rojas]", JSON.stringify(s)))
       .catch((e) => console.error("[zonas-rojas] failed:", e));
+  const ghlInvoices = () =>
+    syncGhlInvoices()
+      .then((n) => n && console.log("[facturas-ghl] pagadas:", n))
+      .catch((e) => console.error("[facturas-ghl] failed:", e));
+  setTimeout(ghlInvoices, 130_000);
+  setInterval(ghlInvoices, 5 * 60_000);
   setTimeout(zones, 80_000);
   setInterval(zones, 60_000);
   setTimeout(redZones, 95_000);

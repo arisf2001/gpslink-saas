@@ -722,6 +722,9 @@ model ManualInvoice {
   dueAt      DateTime
   note       String?   @db.Text
   status     String    @default("OPEN")
+  provider   String    @default("stripe")
+  ghlInvoiceId String?
+  ghlUrl     String?   @db.Text
   sentAt     DateTime?
   paidAt     DateTime?
   method     String?

@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { parseMoneyToCents } from "@/lib/format";
-import { createManualInvoice, markManualInvoicePaid, sendManualInvoice, type InvoiceItem } from "@/lib/manual-invoices";
+import { ghlConfig } from "@/lib/ghl";
+import { createGhlPayment, createManualInvoice, markManualInvoicePaid, sendManualInvoice, type InvoiceItem } from "@/lib/manual-invoices";
 import { getSession } from "@/lib/session";
 
 async function requireAdmin() {
@@ -22,6 +23,9 @@ export async function createInvoiceAction(formData: FormData) {
   const phone = String(formData.get("phone") ?? "").trim() || company?.phone || null;
   if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) back("Pon el nombre y un correo válido del cliente.", "error");
   const currency = formData.get("currency") === "dop" ? "dop" : "usd";
+  const provider = formData.get("provider") === "ghl" ? "ghl" : "stripe";
+  if (provider === "ghl" && !ghlConfig()) back("GHL no está conectado en el servidor.", "error");
+  if (provider === "ghl" && currency !== "usd") back("Por GHL solo se puede cobrar en US$.", "error");
   const items: InvoiceItem[] = [];
   const descs = formData.getAll("desc"), qtys = formData.getAll("qty"), prices = formData.getAll("price");
   for (let i = 0; i < descs.length; i++) {
@@ -36,8 +40,16 @@ export async function createInvoiceAction(formData: FormData) {
   const due = new Date(`${String(formData.get("dueAt") ?? "")}T12:00:00-04:00`);
   const dueAt = isNaN(due.getTime()) ? new Date(Date.now() + 7 * 86400000) : due;
   const note = String(formData.get("note") ?? "").trim().slice(0, 1000) || null;
-  const inv = await createManualInvoice({ companyId: company?.id ?? null, name, email, phone, currency, items, dueAt, note });
+  const inv = await createManualInvoice({ companyId: company?.id ?? null, name, email, phone, currency, items, dueAt, note, provider });
   revalidatePath("/admin/facturas");
+  if (provider === "ghl") {
+    try {
+      await createGhlPayment(inv.id);
+    } catch (e) {
+      await prisma.manualInvoice.update({ where: { id: inv.id }, data: { status: "VOID" } });
+      back(`No se pudo crear la factura en GHL, así que la anulé: ${e instanceof Error ? e.message : e}`, "error");
+    }
+  }
   if (formData.get("send") === "on") {
     const res = await sendManualInvoice(inv.id);
     if (!res.ok) back(`Factura creada, pero no se pudo enviar el correo: ${res.error ?? ""}`, "error");

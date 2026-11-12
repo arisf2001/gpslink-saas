@@ -24,6 +24,7 @@ export const CATEGORY_LABELS = {
 
 export const METHOD_LABELS: Record<string, string> = {
   stripe: "Tarjeta (Stripe)",
+  ghl: "Tarjeta (GHL)",
   deposito: "Depósito / transferencia",
   azul: "Azul",
   efectivo: "Efectivo",

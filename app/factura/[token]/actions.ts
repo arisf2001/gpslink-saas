@@ -3,13 +3,17 @@
 import { redirect } from "next/navigation";
 import { appUrl } from "@/lib/config";
 import { prisma } from "@/lib/db";
-import { invoiceLabel } from "@/lib/manual-invoices";
+import { createGhlPayment, invoiceLabel } from "@/lib/manual-invoices";
 import { getStripe } from "@/lib/stripe";
 
 export async function payInvoiceAction(formData: FormData) {
   const token = String(formData.get("token") ?? "");
   const inv = await prisma.manualInvoice.findUnique({ where: { token } });
   if (!inv || inv.status !== "OPEN") redirect(`/factura/${encodeURIComponent(token)}`);
+  if (inv.provider === "ghl") {
+    const url = await createGhlPayment(inv.id).catch((e) => (console.error("[factura-ghl]", e), null));
+    redirect(url ?? `/factura/${token}?pago=no-disponible`);
+  }
   const stripe = getStripe();
   if (!stripe) redirect(`/factura/${token}?pago=no-disponible`);
   const session = await stripe.checkout.sessions.create({

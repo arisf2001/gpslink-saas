@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { formatDate, formatMoney, METHOD_LABELS } from "@/lib/format";
-import { invoiceUrl } from "@/lib/manual-invoices";
+import { ghlConfig } from "@/lib/ghl";
+import { checkGhlInvoice, invoiceUrl } from "@/lib/manual-invoices";
 import { getSession } from "@/lib/session";
 import { AdminShell } from "../admin-shell";
 import { createInvoiceAction, markPaidAction, sendInvoiceAction, voidInvoiceAction } from "./actions";
@@ -19,7 +20,13 @@ export default async function AdminInvoicesPage({ searchParams }: { searchParams
     prisma.company.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, email: true } }),
     prisma.manualInvoice.findMany({ orderBy: { number: "desc" }, take: 200 }),
   ]);
+  for (const inv of invoices) {
+    if (inv.provider !== "ghl" || inv.status !== "OPEN") continue;
+    const paid = await checkGhlInvoice(inv).catch(() => null);
+    if (paid) Object.assign(inv, paid);
+  }
   const due = defaultDue();
+  const ghl = !!ghlConfig();
 
   return (
     <AdminShell>
@@ -51,6 +58,7 @@ export default async function AdminInvoicesPage({ searchParams }: { searchParams
           </table>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 10 }}>
             <label>Moneda<select name="currency" defaultValue="usd"><option value="usd">US$ (dólares)</option><option value="dop">RD$ (pesos)</option></select></label>
+            <label>Cobrar por<select name="provider" defaultValue={ghl ? "ghl" : "stripe"}>{ghl && <option value="ghl">GHL (solo US$)</option>}<option value="stripe">Stripe</option></select></label>
             <label>Vence<input name="dueAt" type="date" defaultValue={due} /></label>
           </div>
           <label>Nota (opcional)<textarea name="note" rows={2} placeholder="Ej.: Gracias por preferirnos." /></label>
@@ -70,7 +78,7 @@ export default async function AdminInvoicesPage({ searchParams }: { searchParams
                   <td>{String(inv.number).padStart(4, "0")}</td>
                   <td>{inv.name}<br /><span className="hint">{inv.email}</span></td>
                   <td style={{ textAlign: "right" }}>{formatMoney(inv.totalCents, inv.currency)}</td>
-                  <td>{formatDate(inv.dueAt)}</td>
+                  <td>{formatDate(inv.dueAt)}<br /><span className="hint">{inv.provider === "ghl" ? "GHL" : "Stripe"}</span></td>
                   <td>{STATUS[inv.status] ?? inv.status}{inv.status === "PAID" && inv.method ? <><br /><span className="hint">{METHOD_LABELS[inv.method] ?? inv.method}</span></> : null}{inv.sentAt ? <><br /><span className="hint">Enviada {formatDate(inv.sentAt)}</span></> : null}</td>
                   <td>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>

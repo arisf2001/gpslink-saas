@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/db";
 import { formatDate, formatMoney, METHOD_LABELS } from "@/lib/format";
-import { applyManualInvoiceCheckout, invoiceItems, invoiceLabel } from "@/lib/manual-invoices";
+import { applyManualInvoiceCheckout, checkGhlInvoice, invoiceItems, invoiceLabel } from "@/lib/manual-invoices";
 import { getStripe } from "@/lib/stripe";
 import { payInvoiceAction } from "./actions";
 import { PrintButton } from "./print-button";
@@ -18,6 +18,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
     const session = await stripe.checkout.sessions.retrieve(session_id).catch(() => null);
     if (session?.metadata?.invoiceId === inv.id) inv = (await applyManualInvoiceCheckout(session)) ?? inv;
   }
+  if (inv?.provider === "ghl" && inv.status === "OPEN") inv = (await checkGhlInvoice(inv).catch(() => null)) ?? inv;
   if (!inv || inv.status === "VOID") {
     return <main className="wrap" style={{ maxWidth: 640, margin: "40px auto", padding: "0 16px" }}><div className="panel" style={{ padding: 24 }}><p>Esta factura no existe o fue anulada. Escríbenos si tienes dudas.</p></div></main>;
   }
