@@ -39,7 +39,7 @@ async function contactId(cfg: GhlConfig, input: { name: string; email: string; p
   return id;
 }
 
-// Creates the invoice in GHL ("Text2Pay", send mode) and returns its public payment page.
+// Creates the invoice in GHL as a draft and marks it "sent manually", so GHL never emails the client (we send our own email).
 export async function ghlText2Pay(
   cfg: GhlConfig,
   inv: { name: string; email: string; phone: string | null; title: string; items: { desc: string; qty: number; unitCents: number }[]; dueAt: Date; note: string | null },
@@ -63,7 +63,7 @@ export async function ghlText2Pay(
       sentTo: { email: [inv.email] },
       termsNotes: inv.note ? `${inv.title}. ${inv.note}` : inv.title,
       liveMode: true,
-      action: "send",
+      action: "draft",
       userId: cfg.userId,
     }),
   });
@@ -71,6 +71,15 @@ export async function ghlText2Pay(
   const invoiceId = str(obj(body.invoice)._id);
   const url = str(body.invoiceUrl);
   if (!res.ok || !invoiceId || !url) throw new Error(`GHL factura (${res.status}): ${message(body) || "sin enlace de pago"}`);
+  const sent = await fetch(`${GHL}/invoices/${encodeURIComponent(invoiceId)}/send`, {
+    method: "POST",
+    headers: headers(cfg),
+    body: JSON.stringify({ altId: cfg.locationId, altType: "location", userId: cfg.userId, action: "send_manually", liveMode: true }),
+  });
+  if (!sent.ok) {
+    await ghlVoid(cfg, invoiceId).catch(() => null);
+    throw new Error(`GHL factura (${sent.status}): ${message(obj(await sent.json().catch(() => ({})))) || "no se pudo activar el pago"}`);
+  }
   return { id: invoiceId, url };
 }
 
@@ -79,4 +88,9 @@ export async function ghlInvoiceStatus(cfg: GhlConfig, invoiceId: string): Promi
   if (!res.ok) return null;
   const body = obj(await res.json().catch(() => ({})));
   return str((body.status ? body : obj(body.invoice)).status) || null;
+}
+
+export async function ghlVoid(cfg: GhlConfig, invoiceId: string): Promise<boolean> {
+  const res = await fetch(`${GHL}/invoices/${encodeURIComponent(invoiceId)}/void`, { method: "POST", headers: headers(cfg), body: JSON.stringify({ altId: cfg.locationId, altType: "location" }) });
+  return res.ok;
 }

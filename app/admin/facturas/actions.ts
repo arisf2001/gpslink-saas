@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { parseMoneyToCents } from "@/lib/format";
-import { ghlConfig } from "@/lib/ghl";
+import { ghlConfig, ghlVoid } from "@/lib/ghl";
 import { createGhlPayment, createManualInvoice, markManualInvoicePaid, sendManualInvoice, type InvoiceItem } from "@/lib/manual-invoices";
 import { getSession } from "@/lib/session";
 
@@ -65,8 +65,16 @@ export async function sendInvoiceAction(formData: FormData) {
   back(res.ok ? "Correo enviado." : `No se pudo enviar: ${res.error ?? ""}`, res.ok ? "ok" : "error");
 }
 
+// Closes the GHL copy so the client can't pay it again after the owner marks it paid or void here.
+async function closeGhl(id: string) {
+  const cfg = ghlConfig();
+  const inv = await prisma.manualInvoice.findUnique({ where: { id }, select: { ghlInvoiceId: true } });
+  if (cfg && inv?.ghlInvoiceId) await ghlVoid(cfg, inv.ghlInvoiceId).catch(() => false);
+}
+
 export async function markPaidAction(formData: FormData) {
   await requireAdmin();
+  await closeGhl(String(formData.get("id")));
   await markManualInvoicePaid(String(formData.get("id")), { method: String(formData.get("method") || "manual"), reference: String(formData.get("reference") ?? "").trim() || null });
   revalidatePath("/admin/facturas");
   back("Factura marcada como pagada.");
@@ -74,6 +82,7 @@ export async function markPaidAction(formData: FormData) {
 
 export async function voidInvoiceAction(formData: FormData) {
   await requireAdmin();
+  await closeGhl(String(formData.get("id")));
   await prisma.manualInvoice.updateMany({ where: { id: String(formData.get("id")), status: "OPEN" }, data: { status: "VOID" } });
   revalidatePath("/admin/facturas");
   back("Factura anulada.");
