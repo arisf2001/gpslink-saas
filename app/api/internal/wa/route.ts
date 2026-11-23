@@ -19,7 +19,7 @@ export async function POST(req: Request) {
   }
   const links: string[] = [];
   const options: string[] = [];
-  const reply = await handleIncoming(body.companyId, body.phone.replace(/\D/g, ""), text, { voice, links, options, name: typeof body.name === "string" ? body.name.slice(0, 80) : null }).catch(fail);
+  const reply = await handleIncoming(body.companyId, body.phone.replace(/\D/g, ""), text, { voice, links, options: body.companyId === "gpslinkmeta" ? options : undefined, name: typeof body.name === "string" ? body.name.slice(0, 80) : null }).catch(fail);
   const link = links.length ? links.join("\n") : null;
   const extra = options.length ? { options } : {};
   if (!voice || !reply || /https?:\/\//.test(reply)) return Response.json({ reply: reply && link ? `${reply}\n${link}` : reply, ...extra });
