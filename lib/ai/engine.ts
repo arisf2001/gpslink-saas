@@ -80,7 +80,7 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
     "Alerts: when the customer asks to be told when a vehicle moves, goes over a speed or stays stopped some minutes, use create_alert (one call per vehicle and alert). Speeds are in km/h; if they say mph, convert.",
     "When the membership or the SIM data plan is expired (check_service) or the customer wants to renew or pay, call membership_payment_link and send exactly its payment_url. Never write or invent a payment link yourself: if the tool returns an error, say the team will send the link.",
     "New device: when the customer wants to add/activate a GPS or sends a photo with an IMEI, confirm the IMEI, ask the model (GT06 or SinoTrack) and a name for the vehicle if missing, then call activate_device and send its SMS instructions and card_url.",
-    channel === "whatsapp" ? "When you ask the customer to pick one of 2 to 10 choices (which vehicle, yes/cancel for an owner confirmation), end the reply with a last line 'OPCIONES: choice 1 | choice 2 | …' (each choice at most 24 characters, e.g. the vehicle name). It becomes tap buttons; do not use it otherwise." : "",
+    channel === "whatsapp" ? "When you ask the customer to pick one of 2 to 10 choices (which vehicle; for an owner confirmation use exactly 'OPCIONES: Sí | Cancelar'), end the reply with a last line 'OPCIONES: choice 1 | choice 2 | …' (each choice at most 24 characters, e.g. the vehicle name). It becomes tap buttons; do not use it otherwise." : "",
     "Never delete vehicles or devices. The customer cannot change their email or phone number by chat or voice: tell them to change it in the platform or with support.",
     "When the customer asks why a vehicle is not updating, is offline or does not move on the map, call check_service. If problems include sim_data_plan_expired, sim_data_used_up, membership_expired or account_expired_or_suspended, say it plainly, e.g. 'El plan de datos de tu GPS está vencido; debes renovar tu membresía en la plataforma.' If none_found, explain with gps_device (not connected to power, no GSM signal, time since last contact) and suggest checking the power or that it may be where there is no coverage. Never invent a cause.",
     "To know which vehicles are in a city, state or country, use vehicles_in_place; give the total and name them (on voice, name at most 5 and say how many more).",
@@ -173,7 +173,7 @@ async function saveCustomerName(userId: number, first: string, last: string): Pr
 // The change runs only on the owner's next turn, when his own message is a "sí" to that same pending action.
 const adminPending = new Map<number, { key: string; until: number }>();
 // Only a plain yes ("sí", "sí, hazlo", "ok"); anything with more words ("sí, pero no lo suspendas") is not an approval.
-const YES_RE = /^\s*(s[ií]|confirmo|confirmado|dale|ok|okay|yes|hazlo|procede)(?:[\s,.!]+(s[ií]|hazlo|dale|procede|confirmo))?[\s.!]*$/iu;
+const YES_RE = /^\s*(s[ií]|confirmo|confirmado|dale|ok|okay|yes|hazlo|procede)(?:[\s,.!]+(s[ií]|hazlo|dale|procede|confirmo|confirmar))?[\s.!]*$/iu;
 function ownerApproved(userId: number, key: string, ownerMessage: string): boolean {
   const p = adminPending.get(userId);
   if (p && p.key === key && p.until > Date.now() && YES_RE.test(ownerMessage)) {
