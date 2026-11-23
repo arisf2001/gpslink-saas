@@ -465,7 +465,7 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
   });
   tools.create_red_zone = async ({ place, lat, lng, radius_km, device_ids, name }) => {
     const ids = Array.isArray(device_ids) ? device_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
-    for (const id of ids) if (!(await find(id))) return { error: `Vehicle ${id} not found among the customer's vehicles` };
+    for (const id of ids) if (!(await find(id)) || !(await isOwn(id))) return { error: `Vehicle ${id} is not in this account: red zones only cover the account's own vehicles` };
     const radius = Number(radius_km);
     if (radius_km !== undefined && !(radius > 0 && radius <= MAX_ZONE_KM)) return { error: `radius_km must be between 0.1 and ${MAX_ZONE_KM}` };
     const point = Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) && lat !== undefined && lng !== undefined ? { lat: Number(lat), lng: Number(lng) } : null;
