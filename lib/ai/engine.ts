@@ -6,6 +6,9 @@ import { findPlace, insidePlace, reverseGeocode } from "./geocode";
 import { createRedZone, deleteRedZone, listRedZones, MAX_ZONE_KM, zoneDevices, zoneShape } from "../red-zones";
 import { CUT_SPEED_KMH } from "../border-zones";
 import { deviceStatuses } from "../device-status";
+import { withGpswoxDb } from "../gpswox";
+import { statusLabel } from "../sim/carriers";
+import type { RowDataPacket } from "mysql2/promise";
 import { colorName, matchesVehicle, typeName, vehicleProfiles, type VehicleProfile } from "../vehicle-profile";
 
 const describe = (p: VehicleProfile | undefined) =>
@@ -29,6 +32,9 @@ const MAX_ROUNDS = 6;
 const TOOLS = [
   { type: "function", function: { name: "list_vehicles", description: "List the customer's vehicles with status, make, model, year, color, type and nickname. Use it to find a vehicle by name, plate, nickname, color, make, model or type (e.g. 'la jeepeta', 'el carro rojo', 'el Toyota').", parameters: { type: "object", properties: { search: { type: "string", description: "Optional filter: name, plate, nickname, color, make, model or type, in the customer's words" } }, additionalProperties: false } } },
   { type: "function", function: { name: "get_vehicle", description: "Current location, address, speed, ignition and last report of one vehicle.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "create_alert", description: "Create an alert for one vehicle, sent to the app and WhatsApp: movement (starts moving), overspeed (above speed_kmh) or stop (stopped longer than minutes).", parameters: { type: "object", properties: { device_id: { type: "integer" }, kind: { type: "string", enum: ["movement", "overspeed", "stop"] }, speed_kmh: { type: "number" }, minutes: { type: "number" } }, required: ["device_id", "kind"], additionalProperties: false } } },
+  { type: "function", function: { name: "save_customer_name", description: "Save the customer's first and last name on their account when it is missing (only when they tell you their name). It cannot change email or phone.", parameters: { type: "object", properties: { first_name: { type: "string" }, last_name: { type: "string" } }, required: ["first_name"], additionalProperties: false } } },
+  { type: "function", function: { name: "check_service", description: "Why a vehicle is not updating / offline: GPS Link membership and account expiration, SIM data plan (status, expiry, data used) and GPS device power/signal.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
   { type: "function", function: { name: "vehicles_in_place", description: "Which of the customer's vehicles are now inside a city, state, province, neighbourhood or country (e.g. 'Allentown', 'Florida', 'Santo Domingo', 'República Dominicana').", parameters: { type: "object", properties: { place: { type: "string", description: "Place name, adding the state or country when it is ambiguous (e.g. 'Santiago, República Dominicana')" } }, required: ["place"], additionalProperties: false } } },
   { type: "function", function: { name: "send_location_whatsapp", description: "Send one vehicle's current location (address, nearby place and map link) to the customer's OWN WhatsApp: the number in their tracking platform profile (and any WhatsApp linked to the account). It never sends to other numbers.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
   { type: "function", function: { name: "get_history", description: "Trips summary for a vehicle between two local datetimes (America/Santo_Domingo): distance, top speed, moving/stopped time and stops.", parameters: { type: "object", properties: { device_id: { type: "integer" }, from: { type: "string", description: "YYYY-MM-DD HH:MM" }, to: { type: "string", description: "YYYY-MM-DD HH:MM" } }, required: ["device_id", "from", "to"], additionalProperties: false } } },
@@ -43,15 +49,16 @@ function localNow(): string {
   return new Date().toLocaleString("sv-SE", { timeZone: "America/Santo_Domingo" }).slice(0, 16);
 }
 
-function greetRule(greet: string | null | undefined, lang: Lang): string {
+function greetRule(greet: string | null | undefined, lang: Lang, askName = false): string {
   if (greet === undefined || greet === null) return "";
+  if (askName) return `This is the first message of the conversation and the customer's name is missing on their account: start with "${lang === "en" ? "Hi" : "Hola"}", ask their first and last name before anything else, and call save_customer_name when they tell you. Then help with what they asked.`;
   const hello = lang === "en" ? `Hi${greet ? ` ${greet}` : ""}` : `Hola${greet ? ` ${greet}` : ""}`;
   return `This is the first message of the conversation: start your reply with "${hello}". Unless the customer already named a vehicle, you MUST call list_vehicles first. With one vehicle, give its details right away. With 2 to 6, ask which one they want to know about, naming every one by make plus color or type (e.g. "¿De cuál de tus vehículos quieres saber: el Toyota, la Honda negra o el motor?"). With more than 6, say how many they have and ask them to tell you the name, plate or make.`;
 }
 
-function systemPrompt(assistantName: string, companyName: string, lang: Lang, deviceId: number | null, channel: Channel, spoken = false, greet?: string | null): string {
+function systemPrompt(assistantName: string, companyName: string, lang: Lang, deviceId: number | null, channel: Channel, spoken = false, greet?: string | null, askName = false): string {
   return [
-    greetRule(greet, lang),
+    greetRule(greet, lang, askName),
     `You are "${assistantName}", the vehicle tracking assistant of ${companyName}. Reply in ${lang === "en" ? "English" : "Spanish (Dominican Republic, tú)"}.`,
     `Current local time (America/Santo_Domingo): ${localNow()}.`,
     "You only know the customer's own vehicles, through the tools. Never invent locations, speeds or data; if a tool fails, say so.",
@@ -62,6 +69,9 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
       ? "Spoken answer: no GPS device status line. Mention battery, signal or power only when asked or when something is wrong (not connected to the vehicle power, low battery, engine blocked). Never say a value is unavailable: just skip unknown values (ignition, satellites, etc.)."
       : "When you describe one vehicle, add one short line with its GPS device status from gps_device: battery %, GSM signal (x/4), satellites, whether it is connected to the vehicle power and whether the engine is blocked. Say \"no disponible\" for missing values; never invent them. If it is not connected to the vehicle power, point it out.",
     "When several vehicles match, ask which one. If the customer has only one vehicle, use it.",
+    "Alerts: when the customer asks to be told when a vehicle moves, goes over a speed or stays stopped some minutes, use create_alert (one call per vehicle and alert). Speeds are in km/h; if they say mph, convert.",
+    "Never delete vehicles or devices. The customer cannot change their email or phone number by chat or voice: tell them to change it in the platform or with support.",
+    "When the customer asks why a vehicle is not updating, is offline or does not move on the map, call check_service. If problems include sim_data_plan_expired, sim_data_used_up, membership_expired or account_expired_or_suspended, say it plainly, e.g. 'El plan de datos de tu GPS está vencido; debes renovar tu membresía en la plataforma.' If none_found, explain with gps_device (not connected to power, no GSM signal, time since last contact) and suggest checking the power or that it may be where there is no coverage. Never invent a cause.",
     "To know which vehicles are in a city, state or country, use vehicles_in_place; give the total and name them (on voice, name at most 5 and say how many more).",
     "Customers may refer to a vehicle by its nickname, color, make, model or type (e.g. 'la jeepeta', 'el carro rojo', 'el Toyota'): pass those words as the list_vehicles search, and mention the nickname when you answer.",
     "Street View images are from Google and are not live; the location and speed are live.",
@@ -124,6 +134,64 @@ async function deviceInfo(deviceId: number) {
   };
 }
 
+// Name on the customer's tracking account (GPSWOX client form); null when missing.
+export async function customerName(userId: number): Promise<{ first: string; last: string } | null> {
+  return withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT c.first_name, c.last_name FROM users u LEFT JOIN clients c ON c.id = u.client_id WHERE u.id = ?", [userId]);
+    const first = String(rows[0]?.first_name ?? "").trim();
+    return first ? { first, last: String(rows[0]?.last_name ?? "").trim() } : null;
+  });
+}
+
+// Fills a missing name only; never overwrites one that is on file.
+async function saveCustomerName(userId: number, first: string, last: string): Promise<boolean> {
+  return withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT u.client_id, c.first_name FROM users u LEFT JOIN clients c ON c.id = u.client_id WHERE u.id = ?", [userId]);
+    if (!rows[0]) return false;
+    if (String(rows[0].first_name ?? "").trim()) return false;
+    if (rows[0].client_id && rows[0].first_name !== undefined && rows[0].first_name !== null) {
+      await conn.query("UPDATE clients SET first_name = ?, last_name = ?, updated_at = NOW() WHERE id = ?", [first, last, rows[0].client_id]);
+    } else {
+      const [res] = await conn.query("INSERT INTO clients (first_name, last_name, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [first, last]);
+      await conn.query("UPDATE users SET client_id = ? WHERE id = ?", [(res as { insertId: number }).insertId, userId]);
+    }
+    return true;
+  });
+}
+
+// Why a vehicle stopped updating: device membership, account and SIM plan expiry (GPSWOX + our SIM sync).
+async function serviceStatus(userId: number, deviceId: number) {
+  const day = (col: string) => `IF(${col} > '2000-01-01', DATE_FORMAT(${col}, '%Y-%m-%d'), NULL)`;
+  const [row, sim] = await Promise.all([
+    withGpswoxDb(async (conn) => {
+      const [rows] = await conn.query<RowDataPacket[]>(
+        `SELECT ${day("d.expiration_date")} AS device_exp, ${day("d.sim_expiration_date")} AS sim_exp, ${day("u.subscription_expiration")} AS account_exp, u.active
+           FROM devices d JOIN users u ON u.id = ? WHERE d.id = ?`,
+        [userId, deviceId],
+      );
+      return rows[0] ?? null;
+    }).catch(() => null),
+    prisma.simCard.findFirst({ where: { deviceId, goneAt: null }, orderBy: { lastSyncAt: "desc" } }).catch(() => null),
+  ]);
+  const today = new Date().toISOString().slice(0, 10);
+  const past = (d: string | null | undefined) => !!d && d < today;
+  const simExp = sim?.expiresAt ? sim.expiresAt.toISOString().slice(0, 10) : (row?.sim_exp ?? null);
+  const simDown = sim ? sim.status === 3 || sim.status === 5 || past(simExp) : past(simExp);
+  const usedUp = !!sim && sim.totalMb > 0 && sim.usedMb >= sim.totalMb;
+  const problems = [
+    past(row?.device_exp) && "membership_expired",
+    (past(row?.account_exp) || row?.active === 0) && "account_expired_or_suspended",
+    simDown && "sim_data_plan_expired",
+    usedUp && "sim_data_used_up",
+  ].filter(Boolean);
+  return {
+    membership_expires: row?.device_exp ?? "not set",
+    account_expires: row?.account_exp ?? "not set",
+    sim: sim ? { status: statusLabel(sim.status), plan_expires: simExp ?? "unknown", data_used_mb: Math.round(sim.usedMb), data_total_mb: Math.round(sim.totalMb) } : simExp ? { plan_expires: simExp } : "not registered",
+    problems: problems.length ? problems : ["none_found"],
+  };
+}
+
 // Named area the vehicle is inside: the customer's own geofence first, then a mapped place outline.
 async function whereInside(userId: number, v: gps.Vehicle, lang: Lang) {
   const [zone, area] = await Promise.all([zoneAt(userId, v.id, v.lat, v.lng), mapAreaAt(v.lat, v.lng, lang)]);
@@ -166,6 +234,11 @@ export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => 
         map_url: gps.mapUrl(v.lat, v.lng), street_view_url: gps.streetViewUrl(v.lat, v.lng),
         gps_device: await deviceInfo(v.id),
       };
+    },
+    check_service: async ({ device_id }) => {
+      const v = await find(Number(device_id));
+      if (!v) return { error: "Vehicle not found among the customer's vehicles" };
+      return { device_id: v.id, name: v.name, status: v.online, last_report_ago: timeAgo(minutesAgo(v.timestamp), lang), gps_device: await deviceInfo(v.id), ...(await serviceStatus(user.userId, v.id)) };
     },
     vehicles_in_place: async ({ place }) => {
       const found = await findPlace(String(place ?? ""), lang);
@@ -226,7 +299,7 @@ export async function sendLocationWhatsApp(user: AiUser, v: gps.Vehicle, lang: L
   return sentTo.length ? { status: "sent", to: `WhatsApp ending in ${sentTo.join(", ")}` } : { error: "The WhatsApp message could not be sent now (WhatsApp not connected). Tell the customer to try later." };
 }
 
-export async function chat(input: { user: AiUser; conversationId: string | null; message: string; lang: Lang; deviceId: number | null; channel: Channel; spoken?: boolean; greet?: string | null }): Promise<ChatResult> {
+export async function chat(input: { user: AiUser; conversationId: string | null; message: string; lang: Lang; deviceId: number | null; channel: Channel; spoken?: boolean; greet?: string | null; askName?: boolean }): Promise<ChatResult> {
   const { user, lang, channel } = input;
   const setting = await aiSetting();
   const config = await assistantConfig(user, lang);
@@ -240,6 +313,9 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
     if (!actions.some((x) => x.type === a.type && x.device_id === a.device_id)) actions.push(a);
   };
   const { tools: readOnly, find } = readTools(user, lang, addAction);
+  // On WhatsApp a customer without a PIN creates it by replying to the confirmation.
+  const pinReady = async () => channel === "whatsapp" || (await hasPin(user.userId));
+  const pinStatus = async () => ((await hasPin(user.userId)) ? "awaiting_pin_confirmation" : "awaiting_new_pin: the customer has no PIN yet; tell them to reply with a new PIN of 4 to 6 digits, it is saved and confirms this order");
   const tools: Record<string, (args: Record<string, unknown>) => Promise<unknown>> = {
     ...readOnly,
     request_engine_command: async ({ device_id, command }) => {
@@ -247,9 +323,9 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
       if (!v) return { error: "Vehicle not found among the customer's vehicles" };
       const cmd = command === "engine_resume" ? "engine_resume" : "engine_stop";
       if (!(await gps.supportsCommand(user.hash, v.id, cmd))) return { error: "This vehicle's GPS does not support this command" };
-      if (!(await hasPin(user.userId))) return { error: "The customer has no PIN yet. Tell them to create one in the assistant settings (PIN option) and ask again." };
+      if (!(await pinReady())) return { error: "The customer has no PIN yet. Tell them to create one in the assistant settings (PIN option) and ask again." };
       confirm = await createConfirm(user, v.id, v.name, cmd);
-      return { status: "awaiting_pin_confirmation", device_id: v.id, name: v.name, plate: v.plate, current_speed: `${v.speed} ${v.speedUnit}` };
+      return { status: await pinStatus(), device_id: v.id, name: v.name, plate: v.plate, current_speed: `${v.speed} ${v.speedUnit}` };
     },
   };
 
@@ -266,20 +342,42 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
     const zone = await createRedZone(user.userId, { place: String(place ?? ""), point, radiusKm: radius_km === undefined ? null : radius, deviceIds: ids, name: name ? String(name) : null }, lang);
     if ("error" in zone) return zone;
     if (voice) return { ...zoneInfo(zone), status: "created_inactive", how_to_activate: "By voice it cannot be activated: tell the customer to say in the app, web or WhatsApp 'activa la zona roja " + zone.name + "' and confirm with the PIN." };
-    if (!(await hasPin(user.userId))) return { ...zoneInfo(zone), status: "created_inactive", error: "The customer has no PIN yet. Tell them to create one in the assistant settings (PIN option) and then ask to activate the zone." };
+    if (!(await pinReady())) return { ...zoneInfo(zone), status: "created_inactive", error: "The customer has no PIN yet. Tell them to create one in the assistant settings (PIN option) and then ask to activate the zone." };
     confirm = await createZoneConfirm(user, zone.id, zone.name);
-    return { ...zoneInfo(zone), status: "awaiting_pin_confirmation" };
+    return { ...zoneInfo(zone), status: await pinStatus() };
   };
   tools.list_red_zones = async () => ({ zones: (await listRedZones(user.userId)).map(zoneInfo) });
   tools.activate_red_zone = async ({ zone_id }) => {
     const zone = (await listRedZones(user.userId)).find((z) => z.id === String(zone_id));
     if (!zone) return { error: "Red zone not found" };
     if (zone.active) return { ...zoneInfo(zone), status: "already_active" };
-    if (!(await hasPin(user.userId))) return { error: "The customer has no PIN yet. Tell them to create one in the assistant settings (PIN option) and ask again." };
+    if (!(await pinReady())) return { error: "The customer has no PIN yet. Tell them to create one in the assistant settings (PIN option) and ask again." };
     confirm = await createZoneConfirm(user, zone.id, zone.name);
-    return { ...zoneInfo(zone), status: "awaiting_pin_confirmation" };
+    return { ...zoneInfo(zone), status: await pinStatus() };
   };
   tools.delete_red_zone = async ({ zone_id }) => ((await deleteRedZone(user, String(zone_id))) ? { status: "deleted" } : { error: "Red zone not found" });
+  tools.create_alert = async ({ device_id, kind, speed_kmh, minutes }) => {
+    const v = await find(Number(device_id));
+    if (!v) return { error: "Vehicle not found among the customer's vehicles" };
+    const k = kind === "overspeed" || kind === "stop" ? kind : "movement";
+    const value = k === "overspeed" ? Number(speed_kmh) : k === "stop" ? Number(minutes) : 0;
+    if (k === "overspeed" && !(value >= 5 && value <= 250)) return { error: "Ask the speed limit in km/h (5 to 250)" };
+    if (k === "stop" && !(value >= 1 && value <= 1440)) return { error: "Ask how many minutes stopped (1 to 1440)" };
+    const label = k === "movement" ? t(lang, "En movimiento", "Moving") : k === "overspeed" ? t(lang, `Más de ${value} km/h`, `Over ${value} km/h`) : t(lang, `Detenido más de ${value} min`, `Stopped over ${value} min`);
+    const { alertKey } = await import("../wa");
+    const { appUrl } = await import("../config");
+    const hook = `${appUrl()}/api/gpswox/alert?u=${user.userId}&k=${alertKey(user.userId)}`;
+    const r = await gps.addAlert(user.hash, v.id, k, `${label} - ${v.name}`.slice(0, 90), value, hook);
+    return r.ok ? { status: "created", vehicle: v.name, alert: label, delivery: "app and WhatsApp" } : { error: `Could not create the alert: ${r.error}` };
+  };
+  if (channel === "whatsapp") {
+    tools.save_customer_name = async ({ first_name, last_name }) => {
+      const clean = (x: unknown) => String(x ?? "").replace(/[^\p{L}\s'.-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 60);
+      const first = clean(first_name);
+      if (first.length < 2) return { error: "Ask the customer's name again" };
+      return (await saveCustomerName(user.userId, first, clean(last_name)).catch(() => false)) ? { status: "saved" } : { status: "already_on_file" };
+    };
+  }
   tools.send_location_whatsapp = async ({ device_id }) => {
     const v = await find(Number(device_id));
     if (!v) return { error: "Vehicle not found among the customer's vehicles" };
@@ -287,14 +385,14 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
   };
   const VOICE_BLOCKED = ["request_engine_command", "activate_red_zone"];
   if (voice) for (const name of VOICE_BLOCKED) delete tools[name];
-  const messages: Msg[] = [{ role: "system", content: systemPrompt(config.name, config.companyName, lang, input.deviceId, channel, input.spoken, input.greet) }, ...past, { role: "user", content: input.message }];
+  const messages: Msg[] = [{ role: "system", content: systemPrompt(config.name, config.companyName, lang, input.deviceId, channel, input.spoken, input.greet, input.askName) }, ...past, { role: "user", content: input.message }];
   // Remote channels (WhatsApp, Alexa) think with Gemini when configured; in-platform chat stays on OpenAI.
   let provider: Provider = (channel === "whatsapp" || channel === "alexa") && process.env.GEMINI_API_KEY ? "gemini" : "openai";
   let reply = "";
   let tokensIn = 0;
   let tokensOut = 0;
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const toolList = voice ? TOOLS.filter((x) => !VOICE_BLOCKED.includes(x.function.name)) : TOOLS;
+    const toolList = TOOLS.filter((x) => x.function.name in tools);
     const effort = voice ? "minimal" : "low";
     let data: Awaited<ReturnType<typeof llm>>;
     try {

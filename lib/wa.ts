@@ -1,8 +1,8 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { borderEngineReply } from "./border-zones";
 import { redZoneEngineReply } from "./red-zones";
-import { aiSetting, confirmCommand, rateLimit, resolveUser, type AiUser } from "./ai/assistant";
-import { chat } from "./ai/engine";
+import { aiSetting, confirmCommand, createPin, hasPin, rateLimit, resolveUser, type AiUser } from "./ai/assistant";
+import { chat, customerName } from "./ai/engine";
 import { prisma } from "./db";
 import { userApiHash, userPhones, usersByPhone } from "./gpswox";
 
@@ -22,6 +22,9 @@ export const META_WA = "gpslinkmeta";
 const GREET_AFTER_MS = 12 * 3600_000;
 
 export const internalKey = () => createHmac("sha256", secret()).update("gpslink-wa-internal").digest("hex");
+
+// Token in each GPSWOX alert webhook URL, so only GPSWOX can make GPS Link message that customer.
+export const alertKey = (userId: number) => createHmac("sha256", internalKey()).update(`alert:${userId}`).digest("hex").slice(0, 32);
 
 export function checkInternalKey(value: string | null): boolean {
   const a = Buffer.from(value ?? "");
@@ -172,9 +175,10 @@ export async function handleIncoming(companyId: string, phone: string, text: str
   const pending = link.pendingUntil && link.pendingUntil > new Date() ? unseal(link.pendingToken) : null;
   const clearPending = () => prisma.waLink.update({ where: { id: link.id }, data: { pendingToken: null, pendingUntil: null } });
   if (pending && /^\d{4,6}$/.test(message)) {
+    const created = !(await hasPin(user.userId)) && (await createPin(user.userId, message));
     const result = await confirmCommand(user, pending, message, "whatsapp", "es");
     if (result.ok || !/quedan/i.test(result.reply)) await clearPending();
-    return result.reply;
+    return created ? `Guardé tu PIN nuevo: úsalo para confirmar tus próximas órdenes.\n${result.reply}` : result.reply;
   }
   if (pending && /^(cancelar|cancel|no)$/i.test(message)) {
     await clearPending();
@@ -182,8 +186,11 @@ export async function handleIncoming(companyId: string, phone: string, text: str
   }
 
   const fresh = await prisma.waLink.findUnique({ where: { id: link.id }, select: { conversationId: true, updatedAt: true } });
-  const greet = companyId === META_WA && (!fresh?.conversationId || Date.now() - fresh.updatedAt.getTime() > GREET_AFTER_MS) ? await firstName(user.userId, opts.name) : null;
-  const result = await chat({ user, conversationId: greet === null ? link.conversationId : null, message, lang: "es", deviceId: null, channel: "whatsapp", spoken: opts.voice, greet });
+  const first = companyId === META_WA && (!fresh?.conversationId || Date.now() - fresh.updatedAt.getTime() > GREET_AFTER_MS);
+  const onFile = first ? await customerName(user.userId).catch(() => null) : null;
+  const greet = first ? (onFile?.first ?? (await firstName(user.userId, opts.name))) : null;
+  const askName = first && onFile === null;
+  const result = await chat({ user, conversationId: greet === null ? link.conversationId : null, message, lang: "es", deviceId: null, channel: "whatsapp", spoken: opts.voice, greet, askName });
   await prisma.waLink.update({
     where: { id: link.id },
     data: { conversationId: result.conversation_id, pendingToken: result.confirm ? seal(result.confirm.token) : null, pendingUntil: result.confirm ? new Date(Date.now() + CONFIRM_MS) : null },
@@ -192,6 +199,10 @@ export async function handleIncoming(companyId: string, phone: string, text: str
   if (!opts.voice) for (const a of result.actions) if ("url" in a && a.url && !reply.includes(a.url)) reply += `\n${a.label}: ${a.url}`;
   // Voice replies: the map link travels as a separate text message after the voice note.
   if (opts.voice && opts.links) for (const a of result.actions) if (a.type === "open_map") opts.links.push(`${a.label}: ${a.url}`);
-  if (result.confirm) reply += "\n\nPara confirmar responde con tu PIN (tienes 2 minutos) o escribe CANCELAR.";
+  if (result.confirm) {
+    reply += (await hasPin(user.userId))
+      ? "\n\nPara confirmar responde con tu PIN (tienes 2 minutos) o escribe CANCELAR."
+      : "\n\nTodavía no tienes PIN. Responde con un PIN nuevo de 4 a 6 números (tienes 2 minutos): lo guardo y con él confirmo la orden. O escribe CANCELAR.";
+  }
   return reply;
 }

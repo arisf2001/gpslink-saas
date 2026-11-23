@@ -174,6 +174,25 @@ export async function sendCustom(hash: string, deviceId: number, data: string): 
   return { ok: false, error: String(res?.error ?? res?.message ?? "sin respuesta") };
 }
 
+export type AlertKind = "movement" | "overspeed" | "stop";
+
+// A GPSWOX alert for one vehicle: app push + a webhook so GPS Link also sends it to the customer's WhatsApp.
+export async function addAlert(hash: string, deviceId: number, kind: AlertKind, name: string, value: number, webhook: string): Promise<{ ok: boolean; error?: string }> {
+  if (isMock()) return { ok: true };
+  const type = kind === "movement" ? "move_start" : kind === "overspeed" ? "overspeed" : "stop_duration";
+  const params: Record<string, string> = {
+    name, type, "devices[0]": String(deviceId), schedule: "0", zone: "0",
+    "notifications[push][active]": "1", "notifications[sound][active]": "1", "notifications[popup][active]": "1", "notifications[popup][input]": "10",
+    "notifications[webhook][active]": "1", "notifications[webhook][input]": webhook,
+  };
+  if (kind === "overspeed") params.overspeed = String(value);
+  if (kind === "stop") params.stop_duration = String(value);
+  if (kind === "movement") params.stop_duration = "0.10";
+  const data = (await userCall(hash, "add_alert", params, "POST").catch((e: Error) => ({ status: 0, message: e.message }))) as { status?: number; message?: string; errors?: Record<string, string[]> };
+  if (data?.status === 1) return { ok: true };
+  return { ok: false, error: data?.errors ? Object.values(data.errors).flat().join(" ") : (data?.message ?? "error") };
+}
+
 export function streetViewUrl(lat: number, lng: number): string {
   return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`;
 }
