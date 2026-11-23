@@ -151,7 +151,7 @@ async function saveCustomerName(userId: number, first: string, last: string): Pr
     if (rows[0].client) {
       await conn.query("UPDATE clients SET first_name = ?, last_name = COALESCE(NULLIF(?, ''), last_name), updated_at = NOW() WHERE id = ?", [first, last, rows[0].client]);
     } else {
-      const [res] = await conn.query("INSERT INTO clients (first_name, last_name, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [first, last]);
+      const [res] = await conn.query("INSERT INTO clients (first_name, last_name, personal_code, birth_date, address, comment, created_at, updated_at) VALUES (?, ?, '', '', '', '', NOW(), NOW())", [first, last]);
       await conn.query("UPDATE users SET client_id = ? WHERE id = ?", [(res as { insertId: number }).insertId, userId]);
     }
     return true;
