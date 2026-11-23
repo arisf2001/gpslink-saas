@@ -252,6 +252,14 @@ function adminTools(userId: number, ownerMessage: string): Record<string, (args:
   };
 }
 
+// The client account a device belongs to (a client before an admin), for owner-mode diagnostics.
+async function deviceAccount(deviceId: number): Promise<number | null> {
+  return withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT p.user_id FROM user_device_pivot p JOIN users u ON u.id = p.user_id WHERE p.device_id = ? ORDER BY u.group_id DESC, p.user_id LIMIT 1", [deviceId]);
+    return rows[0] ? Number(rows[0].user_id) : null;
+  }).catch(() => null);
+}
+
 // Why a vehicle stopped updating: device membership, account and SIM plan expiry (GPSWOX + our SIM sync).
 async function serviceStatus(userId: number, deviceId: number) {
   const day = (col: string) => `IF(${col} > '2000-01-01', DATE_FORMAT(${col}, '%Y-%m-%d'), NULL)`;
@@ -362,7 +370,7 @@ export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => 
     check_service: async ({ device_id }) => {
       const v = await find(Number(device_id));
       if (!v) return { error: "Vehicle not found among the customer's vehicles" };
-      return { device_id: v.id, name: v.name, status: v.online, last_report_ago: timeAgo(minutesAgo(v.timestamp), lang), gps_device: await deviceInfo(v.id), ...(await serviceStatus(user.userId, v.id)) };
+      return { device_id: v.id, name: v.name, status: v.online, last_report_ago: timeAgo(minutesAgo(v.timestamp), lang), gps_device: await deviceInfo(v.id), ...(await serviceStatus((await isOwn(v.id)) ? user.userId : ((await deviceAccount(v.id)) ?? user.userId), v.id)) };
     },
     vehicles_in_place: async ({ place }) => {
       const found = await findPlace(String(place ?? ""), lang);
