@@ -185,7 +185,7 @@ function adminTools(): Record<string, (args: Record<string, unknown>) => Promise
           `SELECT u.id, u.email, u.phone_number AS phone, u.active, ${day("u.subscription_expiration")} AS account_expires, ${fullName} AS name,
                   (SELECT COUNT(*) FROM user_device_pivot p WHERE p.user_id = u.id) AS devices
              FROM users u LEFT JOIN clients c ON c.id = u.client_id
-            WHERE u.email LIKE ? OR ${fullName} LIKE ? ${digits.length >= 7 ? "OR u.phone_number LIKE ?" : ""}
+            WHERE u.email LIKE ? OR ${fullName} LIKE ? ${digits.length >= 7 ? "OR REGEXP_REPLACE(u.phone_number, '[^0-9]', '') LIKE ?" : ""}
             ORDER BY u.id LIMIT 10`,
           [`%${q}%`, `%${q}%`, ...(digits.length >= 7 ? [`%${digits.slice(-7)}%`] : [])],
         );
