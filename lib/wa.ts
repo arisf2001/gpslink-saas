@@ -152,7 +152,7 @@ async function firstName(gpswoxUserId: number, profileName: string | null | unde
   return name.split(/\s+/)[0]?.slice(0, 30) ?? "";
 }
 
-export async function handleIncoming(companyId: string, phone: string, text: string, opts: { voice?: boolean; links?: string[]; name?: string | null } = {}): Promise<string | null> {
+export async function handleIncoming(companyId: string, phone: string, text: string, opts: { voice?: boolean; links?: string[]; name?: string | null; options?: string[] } = {}): Promise<string | null> {
   const owner = companyId === OWNER_WA || companyId === META_WA;
   const direct = companyId === DIRECT_WA || owner;
   const company = direct ? null : await prisma.company.findUnique({ where: { id: companyId } });
@@ -207,9 +207,16 @@ export async function handleIncoming(companyId: string, phone: string, text: str
     data: { conversationId: result.conversation_id, pendingToken: result.confirm ? seal(result.confirm.token) : null, pendingUntil: result.confirm ? new Date(Date.now() + CONFIRM_MS) : null },
   });
   let reply = result.reply;
+  // Official Meta number: a last "OPCIONES: a | b" line becomes tap buttons/list there; elsewhere it is just dropped.
+  const picked = /\n?\s*OPCIONES:\s*(.+)\s*$/i.exec(reply);
+  if (picked) {
+    reply = reply.slice(0, picked.index).trim();
+    if (opts.options) opts.options.push(...picked[1].split("|").map((o) => o.trim().slice(0, 24)).filter(Boolean).slice(0, 10));
+  }
   if (!opts.voice) for (const a of result.actions) if ("url" in a && a.url && !reply.includes(a.url)) reply += `\n${a.label}: ${a.url}`;
   // Voice replies: the map link travels as a separate text message after the voice note.
   if (opts.voice && opts.links) for (const a of result.actions) if (a.type === "open_map") opts.links.push(`${a.label}: ${a.url}`);
+  if (result.confirm && opts.options && !opts.options.length) opts.options.push("Cancelar");
   if (result.confirm) {
     reply += (await hasPin(user.userId))
       ? "\n\nPara confirmar responde con tu PIN (tienes 2 minutos) o escribe CANCELAR."
