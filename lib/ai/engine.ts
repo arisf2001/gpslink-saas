@@ -55,7 +55,7 @@ function localNow(): string {
   return new Date().toLocaleString("sv-SE", { timeZone: "America/Santo_Domingo" }).slice(0, 16);
 }
 
-const ADMIN_RULE = "\nYou are talking to the platform OWNER (administrator) from his own number. He can ask about any client or vehicle and change accounts: use find_clients and client_vehicles to look up, set_client_active and extend_membership to change, then say exactly what changed. Engine commands still need his PIN. Never delete devices or accounts.";
+const ADMIN_RULE = "\nYou are talking to the platform OWNER (administrator) from his own number. He can ask about any client or vehicle on the whole platform (list_vehicles and get_vehicle cover every account) and change accounts: use find_clients and client_vehicles to look up, set_client_active and extend_membership to change, then say exactly what changed. Engine commands still need his PIN. Never delete devices or accounts.";
 
 function greetRule(greet: string | null | undefined, lang: Lang, askName = false): string {
   if (greet === undefined || greet === null) return "";
@@ -263,9 +263,30 @@ async function whereInside(userId: number, v: gps.Vehicle, lang: Lang) {
 }
 
 // Read-only vehicle tools, shared by the chat engine and the MCP connector (Gemini).
-export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => void = () => {}) {
+// Owner mode: every vehicle on the platform, not only the owner's own account (location from the last GPS report).
+async function withPlatform(own: gps.Vehicle[]): Promise<gps.Vehicle[]> {
+  const ids = new Set(own.map((v) => v.id));
+  const rows = await withGpswoxDb(async (conn) => {
+    const [r] = await conn.query<RowDataPacket[]>(
+      `SELECT d.id, d.name, d.plate_number AS plate, t.lastValidLatitude AS lat, t.lastValidLongitude AS lng, t.speed, DATE_FORMAT(t.server_time, '%Y-%m-%dT%H:%i:%sZ') AS reported
+         FROM devices d LEFT JOIN traccar_devices t ON t.id = d.traccar_device_id WHERE d.deleted = 0`,
+    );
+    return r;
+  }).catch((): RowDataPacket[] => []);
+  const others = rows.filter((r) => !ids.has(Number(r.id))).map((r): gps.Vehicle => {
+    const ts = r.reported ? Math.floor(Date.parse(String(r.reported)) / 1000) : 0;
+    return {
+      id: Number(r.id), name: String(r.name ?? `#${r.id}`), plate: r.plate || null, online: ts && Date.now() / 1000 - ts < 600 ? "online" : "offline",
+      lat: Number(r.lat ?? 0), lng: Number(r.lng ?? 0), speed: Math.round(Number(r.speed ?? 0) * 1.852), speedUnit: "kph", engine: null,
+      time: ts ? new Date(ts * 1000).toLocaleString("es-DO", { timeZone: "America/Santo_Domingo" }) : "", timestamp: ts, address: null, stopDuration: null, group: null,
+    };
+  });
+  return [...own, ...others];
+}
+
+export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => void = () => {}, opts: { allVehicles?: boolean } = {}) {
   let cachedVehicles: gps.Vehicle[] | null = null;
-  const fleet = async () => (cachedVehicles ??= await gps.vehicles(user.hash));
+  const fleet = async () => (cachedVehicles ??= opts.allVehicles ? await withPlatform(await gps.vehicles(user.hash)) : await gps.vehicles(user.hash));
   const profileCache = new Map<number, VehicleProfile>();
   const profilesFor = async (ids: number[]) => {
     const missing = ids.filter((id) => !profileCache.has(id));
@@ -376,7 +397,7 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
   const addAction = (a: AiAction) => {
     if (!actions.some((x) => x.type === a.type && x.device_id === a.device_id)) actions.push(a);
   };
-  const { tools: readOnly, find } = readTools(user, lang, addAction);
+  const { tools: readOnly, find } = readTools(user, lang, addAction, { allVehicles: input.admin });
   // On WhatsApp a customer without a PIN creates it by replying to the confirmation.
   const pinReady = async () => channel === "whatsapp" || (await hasPin(user.userId));
   const pinStatus = async () => ((await hasPin(user.userId)) ? "awaiting_pin_confirmation" : "awaiting_new_pin: the customer has no PIN yet; tell them to reply with a new PIN of 4 to 6 digits, it is saved and confirms this order");
