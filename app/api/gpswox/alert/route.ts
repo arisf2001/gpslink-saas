@@ -22,9 +22,9 @@ export async function POST(req: Request) {
   const expected = Buffer.from(Number.isInteger(userId) && userId > 0 ? alertKey(userId) : "");
   if (!expected.length || k.length !== expected.length || !timingSafeEqual(k, expected)) return new Response("forbidden", { status: 403 });
   const e = (await req.json().catch(() => ({}))) as AlertEvent;
-  // The account's current phone wins over an older WhatsApp link (a number the admin since replaced).
   const link = await prisma.waLink.findFirst({ where: { gpswoxUserId: userId }, orderBy: { updatedAt: "desc" }, select: { phone: true } });
-  const phone = [e.user?.phone_number, link?.phone].find((p) => waNumber(p)) ?? null;
+  // The stored link is used only when the account has no phone at all: never a number the admin replaced.
+  const phone = e.user?.phone_number ? (waNumber(e.user.phone_number) ? e.user.phone_number : null) : (link?.phone ?? null);
   if (!phone) return Response.json({ ok: false, error: "no_phone" });
   const lat = Number(e.latitude);
   const lng = Number(e.longitude);
