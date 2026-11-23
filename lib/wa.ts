@@ -207,11 +207,14 @@ export async function handleIncoming(companyId: string, phone: string, text: str
     data: { conversationId: result.conversation_id, pendingToken: result.confirm ? seal(result.confirm.token) : null, pendingUntil: result.confirm ? new Date(Date.now() + CONFIRM_MS) : null },
   });
   let reply = result.reply;
-  // Official Meta number: a last "OPCIONES: a | b" line becomes tap buttons/list there; elsewhere it is just dropped.
+  // Official Meta number: a last "OPCIONES: a | b" line becomes tap buttons/list there; elsewhere it stays as text.
   const picked = /(?:^|\n)[ \t]*OPCIONES:[ \t]*([^\n]+?)\s*$/.exec(reply);
   if (picked) {
+    const choices = picked[1].split("|").map((o) => o.trim().slice(0, 24)).filter(Boolean).slice(0, 10);
     reply = reply.slice(0, picked.index).trim();
-    if (opts.options) opts.options.push(...picked[1].split("|").map((o) => o.trim().slice(0, 24)).filter(Boolean).slice(0, 10));
+    // Only the Meta number renders tap options; QR and others keep the choices as text.
+    if (opts.options) opts.options.push(...choices);
+    else if (choices.length) reply += `\nOpciones: ${choices.join(" · ")}`;
   }
   if (!opts.voice) for (const a of result.actions) if ("url" in a && a.url && !reply.includes(a.url)) reply += `\n${a.label}: ${a.url}`;
   // Voice replies: the map link travels as a separate text message after the voice note.
