@@ -36,6 +36,10 @@ const TOOLS = [
   { type: "function", function: { name: "save_customer_name", description: "Save the customer's first and last name on their account when it is missing (only when they tell you their name). It cannot change email or phone.", parameters: { type: "object", properties: { first_name: { type: "string" }, last_name: { type: "string" } }, required: ["first_name"], additionalProperties: false } } },
   { type: "function", function: { name: "membership_payment_link", description: "Payment link (GHL) to renew one vehicle's yearly GPS membership / SIM data plan at the price set in the system. When paid, the membership is renewed.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
   { type: "function", function: { name: "activate_device", description: "Start activating a new GPS device on the customer's account from its IMEI/ID (e.g. read from a photo): returns the SMS programming instructions and the link to save the card (charged only after it stays connected).", parameters: { type: "object", properties: { imei: { type: "string" }, model: { type: "string", enum: ["gt06", "sinotrack"] }, name: { type: "string" } }, required: ["imei", "model"], additionalProperties: false } } },
+  { type: "function", function: { name: "find_clients", description: "OWNER ONLY: search any tracking client by email, phone or name; returns account id, status, expiry and device count.", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false } } },
+  { type: "function", function: { name: "client_vehicles", description: "OWNER ONLY: vehicles of one client account (id from find_clients) with membership expiry and last report.", parameters: { type: "object", properties: { user_id: { type: "integer" } }, required: ["user_id"], additionalProperties: false } } },
+  { type: "function", function: { name: "set_client_active", description: "OWNER ONLY: activate or suspend a client account by email.", parameters: { type: "object", properties: { email: { type: "string" }, active: { type: "boolean" } }, required: ["email", "active"], additionalProperties: false } } },
+  { type: "function", function: { name: "extend_membership", description: "OWNER ONLY: extend one device's membership by some months (from today if already expired).", parameters: { type: "object", properties: { device_id: { type: "integer" }, months: { type: "integer" } }, required: ["device_id", "months"], additionalProperties: false } } },
   { type: "function", function: { name: "check_service", description: "Why a vehicle is not updating / offline: GPS Link membership and account expiration, SIM data plan (status, expiry, data used) and GPS device power/signal.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
   { type: "function", function: { name: "vehicles_in_place", description: "Which of the customer's vehicles are now inside a city, state, province, neighbourhood or country (e.g. 'Allentown', 'Florida', 'Santo Domingo', 'República Dominicana').", parameters: { type: "object", properties: { place: { type: "string", description: "Place name, adding the state or country when it is ambiguous (e.g. 'Santiago, República Dominicana')" } }, required: ["place"], additionalProperties: false } } },
   { type: "function", function: { name: "send_location_whatsapp", description: "Send one vehicle's current location (address, nearby place and map link) to the customer's OWN WhatsApp: the number in their tracking platform profile (and any WhatsApp linked to the account). It never sends to other numbers.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
@@ -50,6 +54,8 @@ const TOOLS = [
 function localNow(): string {
   return new Date().toLocaleString("sv-SE", { timeZone: "America/Santo_Domingo" }).slice(0, 16);
 }
+
+const ADMIN_RULE = "\nYou are talking to the platform OWNER (administrator) from his own number. He can ask about any client or vehicle and change accounts: use find_clients and client_vehicles to look up, set_client_active and extend_membership to change, then say exactly what changed. Engine commands still need his PIN. Never delete devices or accounts.";
 
 function greetRule(greet: string | null | undefined, lang: Lang, askName = false): string {
   if (greet === undefined || greet === null) return "";
@@ -160,6 +166,61 @@ async function saveCustomerName(userId: number, first: string, last: string): Pr
     }
     return true;
   });
+}
+
+// The owner's own WhatsApp number: read any client account and make account changes.
+function adminTools(): Record<string, (args: Record<string, unknown>) => Promise<unknown>> {
+  const day = (col: string) => `IF(${col} > '2000-01-01', DATE_FORMAT(${col}, '%Y-%m-%d'), NULL)`;
+  const fullName = "TRIM(CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')))";
+  return {
+    find_clients: async ({ query }) => {
+      const q = String(query ?? "").trim();
+      if (q.length < 3) return { error: "Ask for at least 3 letters or digits of the email, phone or name" };
+      const digits = q.replace(/\D/g, "");
+      return withGpswoxDb(async (conn) => {
+        const [rows] = await conn.query<RowDataPacket[]>(
+          `SELECT u.id, u.email, u.phone_number AS phone, u.active, ${day("u.subscription_expiration")} AS account_expires, ${fullName} AS name,
+                  (SELECT COUNT(*) FROM user_device_pivot p WHERE p.user_id = u.id) AS devices
+             FROM users u LEFT JOIN clients c ON c.id = u.client_id
+            WHERE u.email LIKE ? OR ${fullName} LIKE ? ${digits.length >= 7 ? "OR u.phone_number LIKE ?" : ""}
+            ORDER BY u.id LIMIT 10`,
+          [`%${q}%`, `%${q}%`, ...(digits.length >= 7 ? [`%${digits.slice(-7)}%`] : [])],
+        );
+        return { clients: rows.map((r) => ({ user_id: r.id, email: r.email, phone: r.phone || null, name: r.name || null, active: !!r.active, account_expires: r.account_expires, devices: Number(r.devices) })) };
+      });
+    },
+    client_vehicles: async ({ user_id }) =>
+      withGpswoxDb(async (conn) => {
+        const [rows] = await conn.query<RowDataPacket[]>(
+          `SELECT d.id, d.name, d.plate_number AS plate, ${day("d.expiration_date")} AS membership_expires, DATE_FORMAT(t.server_time, '%Y-%m-%dT%H:%i:%sZ') AS reported
+             FROM user_device_pivot p JOIN devices d ON d.id = p.device_id AND d.deleted = 0 LEFT JOIN traccar_devices t ON t.id = d.traccar_device_id
+            WHERE p.user_id = ? ORDER BY d.name LIMIT 60`,
+          [Number(user_id)],
+        );
+        return { vehicles: rows.map((r) => ({ device_id: r.id, name: r.name, plate: r.plate || null, membership_expires: r.membership_expires, minutes_since_last_report: r.reported ? Math.round((Date.now() - new Date(String(r.reported)).getTime()) / 60_000) : "never" })) };
+      }),
+    set_client_active: async ({ email, active }) => {
+      const mail = String(email ?? "").trim().toLowerCase();
+      const { setUserActive, userIdByEmail } = await import("../gpswox");
+      if (!mail || !(await userIdByEmail(mail).catch(() => null))) return { error: "No client account with that email" };
+      await setUserActive(mail, active === true);
+      return { status: active === true ? "activated" : "suspended", email: mail };
+    },
+    extend_membership: async ({ device_id, months }) => {
+      const n = Number(months);
+      if (!Number.isInteger(n) || n < 1 || n > 36) return { error: "Months must be between 1 and 36" };
+      const current = await withGpswoxDb(async (conn) => {
+        const [rows] = await conn.query<RowDataPacket[]>(`SELECT name, ${day("expiration_date")} AS exp FROM devices WHERE id = ? AND deleted = 0`, [Number(device_id)]);
+        return rows[0] ?? null;
+      });
+      if (!current) return { error: "Device not found" };
+      const base = current.exp && new Date(String(current.exp)) > new Date() ? new Date(String(current.exp)) : new Date();
+      base.setMonth(base.getMonth() + n);
+      const { setDeviceExpiration } = await import("../gpswox");
+      await setDeviceExpiration(Number(device_id), base);
+      return { status: "extended", device: current.name, membership_expires: base.toISOString().slice(0, 10) };
+    },
+  };
 }
 
 // Why a vehicle stopped updating: device membership, account and SIM plan expiry (GPSWOX + our SIM sync).
@@ -302,7 +363,7 @@ export async function sendLocationWhatsApp(user: AiUser, v: gps.Vehicle, lang: L
   return sentTo.length ? { status: "sent", to: `WhatsApp ending in ${sentTo.join(", ")}` } : { error: "The WhatsApp message could not be sent now (WhatsApp not connected). Tell the customer to try later." };
 }
 
-export async function chat(input: { user: AiUser; conversationId: string | null; message: string; lang: Lang; deviceId: number | null; channel: Channel; spoken?: boolean; greet?: string | null; askName?: boolean }): Promise<ChatResult> {
+export async function chat(input: { user: AiUser; conversationId: string | null; message: string; lang: Lang; deviceId: number | null; channel: Channel; spoken?: boolean; greet?: string | null; askName?: boolean; admin?: boolean }): Promise<ChatResult> {
   const { user, lang, channel } = input;
   const setting = await aiSetting();
   const config = await assistantConfig(user, lang);
@@ -387,6 +448,7 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
     const { formatMoney } = await import("../format");
     return { vehicle: v.name, amount: formatMoney(renewal.amountCents, renewal.currency), includes_reactivation: renewal.reactivation, payment_url: url, after_payment: `The membership renews for 1 year as soon as the payment is confirmed. ${renewal.reactivation ? REACTIVATION_NOTE : ""}`.trim() };
   };
+  if (input.admin) Object.assign(tools, adminTools());
   if (channel === "whatsapp") {
     tools.activate_device = async ({ imei, model, name }) => {
       const code = String(imei ?? "").replace(/\D/g, "");
@@ -422,7 +484,7 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
   };
   const VOICE_BLOCKED = ["request_engine_command", "activate_red_zone"];
   if (voice) for (const name of VOICE_BLOCKED) delete tools[name];
-  const messages: Msg[] = [{ role: "system", content: systemPrompt(config.name, config.companyName, lang, input.deviceId, channel, input.spoken, input.greet, input.askName) }, ...past, { role: "user", content: input.message }];
+  const messages: Msg[] = [{ role: "system", content: systemPrompt(config.name, config.companyName, lang, input.deviceId, channel, input.spoken, input.greet, input.askName) + (input.admin ? ADMIN_RULE : "") }, ...past, { role: "user", content: input.message }];
   // Remote channels (WhatsApp, Alexa) think with Gemini when configured; in-platform chat stays on OpenAI.
   let provider: Provider = (channel === "whatsapp" || channel === "alexa") && process.env.GEMINI_API_KEY ? "gemini" : "openai";
   let reply = "";

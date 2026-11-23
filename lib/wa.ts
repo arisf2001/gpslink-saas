@@ -4,7 +4,9 @@ import { redZoneEngineReply } from "./red-zones";
 import { aiSetting, confirmCommand, createPin, hasPin, rateLimit, resolveUser, type AiUser } from "./ai/assistant";
 import { chat, customerName } from "./ai/engine";
 import { prisma } from "./db";
-import { userApiHash, userPhones, usersByPhone } from "./gpswox";
+import { userApiHash, userPhones, usersByPhone, withGpswoxDb } from "./gpswox";
+import { BRAND } from "./config";
+import type { RowDataPacket } from "mysql2/promise";
 
 const secret = () => {
   const value = process.env.SESSION_SECRET;
@@ -135,6 +137,14 @@ async function linkFromProfile(key: string, phone: string): Promise<boolean> {
   return true;
 }
 
+// Owner mode needs the owner's number and a GPSWOX administrator account behind it.
+async function isAdminUser(userId: number): Promise<boolean> {
+  return withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT group_id FROM users WHERE id = ? AND active = 1", [userId]);
+    return Number(rows[0]?.group_id) === 1;
+  });
+}
+
 // First name to greet with: the gpslinkusa.com company contact, else the name on the person's WhatsApp profile.
 async function firstName(gpswoxUserId: number, profileName: string | null | undefined): Promise<string> {
   const company = await prisma.company.findFirst({ where: { gpswoxUserId }, select: { contactName: true } }).catch(() => null);
@@ -190,7 +200,8 @@ export async function handleIncoming(companyId: string, phone: string, text: str
   const onFile = first ? await customerName(user.userId).catch(() => null) : null;
   const greet = first ? (onFile?.first ?? (await firstName(user.userId, opts.name))) : null;
   const askName = first && onFile === null;
-  const result = await chat({ user, conversationId: greet === null ? link.conversationId : null, message, lang: "es", deviceId: null, channel: "whatsapp", spoken: opts.voice, greet, askName });
+  const admin = owner && waNumber(phone) === waNumber(BRAND.supportWhatsApp) && (await isAdminUser(user.userId).catch(() => false));
+  const result = await chat({ user, conversationId: greet === null ? link.conversationId : null, message, lang: "es", deviceId: null, channel: "whatsapp", spoken: opts.voice, greet, askName, admin });
   await prisma.waLink.update({
     where: { id: link.id },
     data: { conversationId: result.conversation_id, pendingToken: result.confirm ? seal(result.confirm.token) : null, pendingUntil: result.confirm ? new Date(Date.now() + CONFIRM_MS) : null },
