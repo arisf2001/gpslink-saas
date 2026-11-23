@@ -400,7 +400,11 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
       if (!avail.ok) return { error: "Activation by WhatsApp is not available for this account: tell the customer the team will help" };
       const url = await act.startActivation({ gpswoxUserId: user.userId, email: user.email, companyId: avail.companyId, model: m, imei: code, name: String(name ?? "").trim().slice(0, 60) || `GPS ${code.slice(-4)}` }).catch(() => null);
       if (!url) return { error: "The activation could not start now: tell the customer the team will help" };
-      return { status: "card_needed", imei: code, card_url: url, sms_instructions: act.instructionLines(m), note: `Send the SMS instructions and the card link. The device is charged only after it stays connected ${act.STABLE_HOURS} hours.` };
+      const setting = await act.activationSetting();
+      const total = act.offerTotal(setting);
+      const { formatMoney } = await import("../format");
+      const price = total > 0 ? `${formatMoney(total, setting.currency)} per year (${act.offerItems(setting).map((i) => i.label).join(" + ")}), renewed yearly on the card` : "no charge";
+      return { status: "card_needed", imei: code, card_url: url, price, sms_instructions: act.instructionLines(m), note: `Tell the price and that it renews yearly, then send the SMS instructions and the card link. The first charge happens only after the device stays connected ${act.STABLE_HOURS} hours.` };
     };
     tools.save_customer_name = async ({ first_name, last_name }) => {
       const clean = (x: unknown) => String(x ?? "").replace(/[^\p{L}\s'.-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 60);
