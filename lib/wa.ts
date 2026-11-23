@@ -200,7 +200,7 @@ export async function handleIncoming(companyId: string, phone: string, text: str
   const onFile = first ? await customerName(user.userId).catch(() => null) : null;
   const greet = first ? (onFile?.first ?? (await firstName(user.userId, opts.name))) : null;
   const askName = first && onFile === null;
-  const admin = owner && waNumber(phone) === waNumber(BRAND.supportWhatsApp) && (await isAdminUser(user.userId).catch(() => false));
+  const admin = owner && waNumber(phone) === waNumber(BRAND.ownerWhatsApp) && (await isAdminUser(user.userId).catch(() => false));
   const result = await chat({ user, conversationId: greet === null ? link.conversationId : null, message, lang: "es", deviceId: null, channel: "whatsapp", spoken: opts.voice, greet, askName, admin });
   await prisma.waLink.update({
     where: { id: link.id },

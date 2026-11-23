@@ -17,4 +17,6 @@ export const BRAND = {
   name: "GPS Link",
   supportEmail: process.env.SUPPORT_EMAIL ?? "info@gpslinkusa.com",
   supportWhatsApp: process.env.SUPPORT_WHATSAPP || "13059272739",
+  // The owner's personal WhatsApp: owner mode in the WhatsApp assistant.
+  ownerWhatsApp: process.env.OWNER_WHATSAPP || "13059272739",
 };
