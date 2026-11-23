@@ -46,7 +46,7 @@ function localNow(): string {
 function greetRule(greet: string | null | undefined, lang: Lang): string {
   if (greet === undefined || greet === null) return "";
   const hello = lang === "en" ? `Hi${greet ? ` ${greet}` : ""}` : `Hola${greet ? ` ${greet}` : ""}`;
-  return `This is the first message of the conversation: start your reply with "${hello}". If the customer did not say which vehicle and has more than one, call list_vehicles and ask which one they want to know about, naming each by make plus color or type (e.g. "¿De cuál de tus vehículos quieres saber: el Toyota, la Honda negra o el motor?"); if they have only one, give its details right away.`;
+  return `This is the first message of the conversation: start your reply with "${hello}". Unless the customer already named a vehicle, you MUST call list_vehicles first. With one vehicle, give its details right away. With 2 to 6, ask which one they want to know about, naming every one by make plus color or type (e.g. "¿De cuál de tus vehículos quieres saber: el Toyota, la Honda negra o el motor?"). With more than 6, say how many they have and ask them to tell you the name, plate or make.`;
 }
 
 function systemPrompt(assistantName: string, companyName: string, lang: Lang, deviceId: number | null, channel: Channel, spoken = false, greet?: string | null): string {
