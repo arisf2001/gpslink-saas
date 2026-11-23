@@ -207,7 +207,13 @@ function adminTools(): Record<string, (args: Record<string, unknown>) => Promise
       const { setUserActive, userIdByEmail } = await import("../gpswox");
       if (!mail || !(await userIdByEmail(mail).catch(() => null))) return { error: "No client account with that email" };
       if (confirmed !== true) return needsConfirmation(`${active === true ? "Activate" : "Suspend"} the account ${mail}`);
-      await setUserActive(mail, active === true);
+      // A white-label client is blocked/unblocked like the company panel does, so the panel shows "Desbloquear".
+      const client = await prisma.endClient.findFirst({ where: { email: mail, goneAt: null }, include: { company: true } });
+      if (client) {
+        const { blockClient, unblockClient } = await import("../clients");
+        if (active !== true) await blockClient(client.company, client, "manual");
+        else if (!(await unblockClient(client))) return { error: "The client is past its paid-until date: register a payment or a new date in the company panel first" };
+      } else await setUserActive(mail, active === true);
       return { status: active === true ? "activated" : "suspended", email: mail };
     },
     extend_membership: async ({ device_id, months, confirmed }) => {
