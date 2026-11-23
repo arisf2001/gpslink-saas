@@ -71,7 +71,7 @@ function systemPrompt(assistantName: string, companyName: string, lang: Lang, de
       : "When you describe one vehicle, add one short line with its GPS device status from gps_device: battery %, GSM signal (x/4), satellites, whether it is connected to the vehicle power and whether the engine is blocked. Say \"no disponible\" for missing values; never invent them. If it is not connected to the vehicle power, point it out.",
     "When several vehicles match, ask which one. If the customer has only one vehicle, use it.",
     "Alerts: when the customer asks to be told when a vehicle moves, goes over a speed or stays stopped some minutes, use create_alert (one call per vehicle and alert). Speeds are in km/h; if they say mph, convert.",
-    "When the membership or the SIM data plan is expired (check_service) or the customer wants to renew or pay, offer membership_payment_link and send its payment_url.",
+    "When the membership or the SIM data plan is expired (check_service) or the customer wants to renew or pay, call membership_payment_link and send exactly its payment_url. Never write or invent a payment link yourself: if the tool returns an error, say the team will send the link.",
     "Never delete vehicles or devices. The customer cannot change their email or phone number by chat or voice: tell them to change it in the platform or with support.",
     "When the customer asks why a vehicle is not updating, is offline or does not move on the map, call check_service. If problems include sim_data_plan_expired, sim_data_used_up, membership_expired or account_expired_or_suspended, say it plainly, e.g. 'El plan de datos de tu GPS está vencido; debes renovar tu membresía en la plataforma.' If none_found, explain with gps_device (not connected to power, no GSM signal, time since last contact) and suggest checking the power or that it may be where there is no coverage. Never invent a cause.",
     "To know which vehicles are in a city, state or country, use vehicles_in_place; give the total and name them (on voice, name at most 5 and say how many more).",
@@ -375,13 +375,13 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
     const v = await find(Number(device_id));
     if (!v) return { error: "Vehicle not found among the customer's vehicles" };
     const card = await prisma.simCard.findFirst({ where: { deviceId: v.id, goneAt: null }, orderBy: { lastSyncAt: "desc" } });
-    if (!card) return { error: "No renewal price on file for this vehicle: tell the customer the team will send the payment link" };
+    if (!card) return { error: "No renewal price on file for this vehicle. Do not give any link: tell the customer the team will send the payment link" };
     const { ensureRenewal, renewalGhlUrl, REACTIVATION_NOTE } = await import("../sim/notify");
     const renewal = await ensureRenewal(card);
-    if (!renewal) return { error: "No renewal price on file for this vehicle: tell the customer the team will send the payment link" };
+    if (!renewal) return { error: "No renewal price on file for this vehicle. Do not give any link: tell the customer the team will send the payment link" };
     const name = await customerName(user.userId).catch(() => null);
     const url = await renewalGhlUrl(renewal, card, { name: name ? `${name.first} ${name.last}`.trim() : user.email, email: user.email, phone: card.ownerPhone }).catch(() => null);
-    if (!url) return { error: "The payment link could not be created now: tell the customer the team will send it" };
+    if (!url) return { error: "The payment link could not be created now. Do not give any link: tell the customer the team will send it" };
     const { formatMoney } = await import("../format");
     return { vehicle: v.name, amount: formatMoney(renewal.amountCents, renewal.currency), includes_reactivation: renewal.reactivation, payment_url: url, after_payment: `The membership renews for 1 year as soon as the payment is confirmed. ${renewal.reactivation ? REACTIVATION_NOTE : ""}`.trim() };
   };
