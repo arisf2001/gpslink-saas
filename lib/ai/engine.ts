@@ -38,8 +38,8 @@ const TOOLS = [
   { type: "function", function: { name: "activate_device", description: "Start activating a new GPS device on the customer's account from its IMEI/ID (e.g. read from a photo): returns the SMS programming instructions and the link to save the card (charged only after it stays connected).", parameters: { type: "object", properties: { imei: { type: "string" }, model: { type: "string", enum: ["gt06", "sinotrack"] }, name: { type: "string" } }, required: ["imei", "model"], additionalProperties: false } } },
   { type: "function", function: { name: "find_clients", description: "OWNER ONLY: search any tracking client by email, phone or name; returns account id, status, expiry and device count.", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false } } },
   { type: "function", function: { name: "client_vehicles", description: "OWNER ONLY: vehicles of one client account (id from find_clients) with membership expiry and last report.", parameters: { type: "object", properties: { user_id: { type: "integer" } }, required: ["user_id"], additionalProperties: false } } },
-  { type: "function", function: { name: "set_client_active", description: "OWNER ONLY: activate or suspend a client account by email.", parameters: { type: "object", properties: { email: { type: "string" }, active: { type: "boolean" } }, required: ["email", "active"], additionalProperties: false } } },
-  { type: "function", function: { name: "extend_membership", description: "OWNER ONLY: extend one device's membership by some months (from today if already expired).", parameters: { type: "object", properties: { device_id: { type: "integer" }, months: { type: "integer" } }, required: ["device_id", "months"], additionalProperties: false } } },
+  { type: "function", function: { name: "set_client_active", description: "OWNER ONLY: activate or suspend a client account by email.", parameters: { type: "object", properties: { email: { type: "string" }, active: { type: "boolean" }, confirmed: { type: "boolean" } }, required: ["email", "active"], additionalProperties: false } } },
+  { type: "function", function: { name: "extend_membership", description: "OWNER ONLY: extend one device's membership by some months (from today if already expired).", parameters: { type: "object", properties: { device_id: { type: "integer" }, months: { type: "integer" }, confirmed: { type: "boolean" } }, required: ["device_id", "months"], additionalProperties: false } } },
   { type: "function", function: { name: "check_service", description: "Why a vehicle is not updating / offline: GPS Link membership and account expiration, SIM data plan (status, expiry, data used) and GPS device power/signal.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
   { type: "function", function: { name: "vehicles_in_place", description: "Which of the customer's vehicles are now inside a city, state, province, neighbourhood or country (e.g. 'Allentown', 'Florida', 'Santo Domingo', 'República Dominicana').", parameters: { type: "object", properties: { place: { type: "string", description: "Place name, adding the state or country when it is ambiguous (e.g. 'Santiago, República Dominicana')" } }, required: ["place"], additionalProperties: false } } },
   { type: "function", function: { name: "send_location_whatsapp", description: "Send one vehicle's current location (address, nearby place and map link) to the customer's OWN WhatsApp: the number in their tracking platform profile (and any WhatsApp linked to the account). It never sends to other numbers.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
@@ -168,6 +168,9 @@ async function saveCustomerName(userId: number, first: string, last: string): Pr
   });
 }
 
+// Account changes run only after the owner confirmed that exact action (client data the model reads cannot trigger them).
+const needsConfirmation = (action: string) => ({ status: "needs_owner_confirmation", action, instruction: "Ask the owner to confirm this exact action; call again with confirmed=true only after he replies yes." });
+
 // The owner's own WhatsApp number: read any client account and make account changes.
 function adminTools(): Record<string, (args: Record<string, unknown>) => Promise<unknown>> {
   const day = (col: string) => `IF(${col} > '2000-01-01', DATE_FORMAT(${col}, '%Y-%m-%d'), NULL)`;
@@ -199,16 +202,18 @@ function adminTools(): Record<string, (args: Record<string, unknown>) => Promise
         );
         return { vehicles: rows.map((r) => ({ device_id: r.id, name: r.name, plate: r.plate || null, membership_expires: r.membership_expires, minutes_since_last_report: r.reported ? Math.round((Date.now() - new Date(String(r.reported)).getTime()) / 60_000) : "never" })) };
       }),
-    set_client_active: async ({ email, active }) => {
+    set_client_active: async ({ email, active, confirmed }) => {
       const mail = String(email ?? "").trim().toLowerCase();
       const { setUserActive, userIdByEmail } = await import("../gpswox");
       if (!mail || !(await userIdByEmail(mail).catch(() => null))) return { error: "No client account with that email" };
+      if (confirmed !== true) return needsConfirmation(`${active === true ? "Activate" : "Suspend"} the account ${mail}`);
       await setUserActive(mail, active === true);
       return { status: active === true ? "activated" : "suspended", email: mail };
     },
-    extend_membership: async ({ device_id, months }) => {
+    extend_membership: async ({ device_id, months, confirmed }) => {
       const n = Number(months);
       if (!Number.isInteger(n) || n < 1 || n > 36) return { error: "Months must be between 1 and 36" };
+      if (confirmed !== true) return needsConfirmation(`Extend the membership of device ${Number(device_id)} by ${n} months`);
       const current = await withGpswoxDb(async (conn) => {
         const [rows] = await conn.query<RowDataPacket[]>(`SELECT name, ${day("expiration_date")} AS exp FROM devices WHERE id = ? AND deleted = 0`, [Number(device_id)]);
         return rows[0] ?? null;
