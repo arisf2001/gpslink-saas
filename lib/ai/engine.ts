@@ -172,7 +172,8 @@ async function saveCustomerName(userId: number, first: string, last: string): Pr
 // Account changes run only after the owner confirmed that exact action (client data the model reads cannot trigger them).
 // The change runs only on the owner's next turn, when his own message is a "sí" to that same pending action.
 const adminPending = new Map<number, { key: string; until: number }>();
-const YES_RE = /^\s*(s[ií]|confirmo|confirmado|dale|ok|okay|yes|hazlo|procede)(?![\p{L}\p{N}])/iu;
+// Only a plain yes ("sí", "sí, hazlo", "ok"); anything with more words ("sí, pero no lo suspendas") is not an approval.
+const YES_RE = /^\s*(s[ií]|confirmo|confirmado|dale|ok|okay|yes|hazlo|procede)(?:[\s,.!]+(s[ií]|hazlo|dale|procede|confirmo))?[\s.!]*$/iu;
 function ownerApproved(userId: number, key: string, ownerMessage: string): boolean {
   const p = adminPending.get(userId);
   if (p && p.key === key && p.until > Date.now() && YES_RE.test(ownerMessage)) {
