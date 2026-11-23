@@ -143,14 +143,13 @@ export async function customerName(userId: number): Promise<{ first: string; las
   });
 }
 
-// Fills a missing name only; never overwrites one that is on file.
+// Fills a missing name only; never overwrites one that is on file, and keeps a surname already there.
 async function saveCustomerName(userId: number, first: string, last: string): Promise<boolean> {
   return withGpswoxDb(async (conn) => {
-    const [rows] = await conn.query<RowDataPacket[]>("SELECT u.client_id, c.first_name FROM users u LEFT JOIN clients c ON c.id = u.client_id WHERE u.id = ?", [userId]);
-    if (!rows[0]) return false;
-    if (String(rows[0].first_name ?? "").trim()) return false;
-    if (rows[0].client_id && rows[0].first_name !== undefined && rows[0].first_name !== null) {
-      await conn.query("UPDATE clients SET first_name = ?, last_name = ?, updated_at = NOW() WHERE id = ?", [first, last, rows[0].client_id]);
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT c.id AS client, c.first_name FROM users u LEFT JOIN clients c ON c.id = u.client_id WHERE u.id = ?", [userId]);
+    if (!rows[0] || String(rows[0].first_name ?? "").trim()) return false;
+    if (rows[0].client) {
+      await conn.query("UPDATE clients SET first_name = ?, last_name = COALESCE(NULLIF(?, ''), last_name), updated_at = NOW() WHERE id = ?", [first, last, rows[0].client]);
     } else {
       const [res] = await conn.query("INSERT INTO clients (first_name, last_name, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [first, last]);
       await conn.query("UPDATE users SET client_id = ? WHERE id = ?", [(res as { insertId: number }).insertId, userId]);
@@ -375,7 +374,9 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
       const clean = (x: unknown) => String(x ?? "").replace(/[^\p{L}\s'.-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 60);
       const first = clean(first_name);
       if (first.length < 2) return { error: "Ask the customer's name again" };
-      return (await saveCustomerName(user.userId, first, clean(last_name)).catch(() => false)) ? { status: "saved" } : { status: "already_on_file" };
+      const saved = await saveCustomerName(user.userId, first, clean(last_name)).catch(() => null);
+      if (saved === null) return { error: "Could not save the name right now; continue helping the customer" };
+      return saved ? { status: "saved" } : { status: "already_on_file" };
     };
   }
   tools.send_location_whatsapp = async ({ device_id }) => {
