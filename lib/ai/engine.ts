@@ -221,12 +221,15 @@ function adminTools(): Record<string, (args: Record<string, unknown>) => Promise
       if (!Number.isInteger(n) || n < 1 || n > 36) return { error: "Months must be between 1 and 36" };
       if (confirmed !== true) return needsConfirmation(`Extend the membership of device ${Number(device_id)} by ${n} months`);
       const current = await withGpswoxDb(async (conn) => {
-        const [rows] = await conn.query<RowDataPacket[]>(`SELECT name, ${day("expiration_date")} AS exp FROM devices WHERE id = ? AND deleted = 0`, [Number(device_id)]);
+        const [rows] = await conn.query<RowDataPacket[]>("SELECT name, IF(expiration_date > '2000-01-01', DATE_FORMAT(expiration_date, '%Y-%m-%dT%H:%i:%sZ'), NULL) AS exp FROM devices WHERE id = ? AND deleted = 0", [Number(device_id)]);
         return rows[0] ?? null;
       });
       if (!current) return { error: "Device not found" };
       const base = current.exp && new Date(String(current.exp)) > new Date() ? new Date(String(current.exp)) : new Date();
-      base.setMonth(base.getMonth() + n);
+      const dayOfMonth = base.getUTCDate();
+      base.setUTCDate(1);
+      base.setUTCMonth(base.getUTCMonth() + n);
+      base.setUTCDate(Math.min(dayOfMonth, new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 0)).getUTCDate()));
       const { setDeviceExpiration } = await import("../gpswox");
       await setDeviceExpiration(Number(device_id), base);
       return { status: "extended", device: current.name, membership_expires: base.toISOString().slice(0, 10) };
