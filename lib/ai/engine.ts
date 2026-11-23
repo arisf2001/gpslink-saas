@@ -38,8 +38,8 @@ const TOOLS = [
   { type: "function", function: { name: "activate_device", description: "Start activating a new GPS device on the customer's account from its IMEI/ID (e.g. read from a photo): returns the SMS programming instructions and the link to save the card (charged only after it stays connected).", parameters: { type: "object", properties: { imei: { type: "string" }, model: { type: "string", enum: ["gt06", "sinotrack"] }, name: { type: "string" } }, required: ["imei", "model"], additionalProperties: false } } },
   { type: "function", function: { name: "find_clients", description: "OWNER ONLY: search any tracking client by email, phone or name; returns account id, status, expiry and device count.", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false } } },
   { type: "function", function: { name: "client_vehicles", description: "OWNER ONLY: vehicles of one client account (id from find_clients) with membership expiry and last report.", parameters: { type: "object", properties: { user_id: { type: "integer" } }, required: ["user_id"], additionalProperties: false } } },
-  { type: "function", function: { name: "set_client_active", description: "OWNER ONLY: activate or suspend a client account by email.", parameters: { type: "object", properties: { email: { type: "string" }, active: { type: "boolean" }, confirmed: { type: "boolean" } }, required: ["email", "active"], additionalProperties: false } } },
-  { type: "function", function: { name: "extend_membership", description: "OWNER ONLY: extend one device's membership by some months (from today if already expired).", parameters: { type: "object", properties: { device_id: { type: "integer" }, months: { type: "integer" }, confirmed: { type: "boolean" } }, required: ["device_id", "months"], additionalProperties: false } } },
+  { type: "function", function: { name: "set_client_active", description: "OWNER ONLY: activate or suspend a client account by email.", parameters: { type: "object", properties: { email: { type: "string" }, active: { type: "boolean" } }, required: ["email", "active"], additionalProperties: false } } },
+  { type: "function", function: { name: "extend_membership", description: "OWNER ONLY: extend one device's membership by some months (from today if already expired).", parameters: { type: "object", properties: { device_id: { type: "integer" }, months: { type: "integer" } }, required: ["device_id", "months"], additionalProperties: false } } },
   { type: "function", function: { name: "check_service", description: "Why a vehicle is not updating / offline: GPS Link membership and account expiration, SIM data plan (status, expiry, data used) and GPS device power/signal.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
   { type: "function", function: { name: "vehicles_in_place", description: "Which of the customer's vehicles are now inside a city, state, province, neighbourhood or country (e.g. 'Allentown', 'Florida', 'Santo Domingo', 'República Dominicana').", parameters: { type: "object", properties: { place: { type: "string", description: "Place name, adding the state or country when it is ambiguous (e.g. 'Santiago, República Dominicana')" } }, required: ["place"], additionalProperties: false } } },
   { type: "function", function: { name: "send_location_whatsapp", description: "Send one vehicle's current location (address, nearby place and map link) to the customer's OWN WhatsApp: the number in their tracking platform profile (and any WhatsApp linked to the account). It never sends to other numbers.", parameters: { type: "object", properties: { device_id: { type: "integer" } }, required: ["device_id"], additionalProperties: false } } },
@@ -170,10 +170,22 @@ async function saveCustomerName(userId: number, first: string, last: string): Pr
 }
 
 // Account changes run only after the owner confirmed that exact action (client data the model reads cannot trigger them).
-const needsConfirmation = (action: string) => ({ status: "needs_owner_confirmation", action, instruction: "Ask the owner to confirm this exact action; call again with confirmed=true only after he replies yes." });
+// The change runs only on the owner's next turn, when his own message is a "sí" to that same pending action.
+const adminPending = new Map<number, { key: string; until: number }>();
+const YES_RE = /^\s*(s[ií]|si,|confirmo|confirmado|dale|ok|okay|yes|hazlo|procede)\b/i;
+function ownerApproved(userId: number, key: string, ownerMessage: string): boolean {
+  const p = adminPending.get(userId);
+  if (p && p.key === key && p.until > Date.now() && YES_RE.test(ownerMessage)) {
+    adminPending.delete(userId);
+    return true;
+  }
+  adminPending.set(userId, { key, until: Date.now() + 5 * 60_000 });
+  return false;
+}
+const needsConfirmation = (action: string) => ({ status: "needs_owner_confirmation", action, instruction: "Ask the owner to confirm this exact action with yes; when he says yes, call the tool again with the same values." });
 
 // The owner's own WhatsApp number: read any client account and make account changes.
-function adminTools(): Record<string, (args: Record<string, unknown>) => Promise<unknown>> {
+function adminTools(userId: number, ownerMessage: string): Record<string, (args: Record<string, unknown>) => Promise<unknown>> {
   const day = (col: string) => `IF(${col} > '2000-01-01', DATE_FORMAT(${col}, '%Y-%m-%d'), NULL)`;
   const fullName = "TRIM(CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')))";
   return {
@@ -203,11 +215,12 @@ function adminTools(): Record<string, (args: Record<string, unknown>) => Promise
         );
         return { vehicles: rows.map((r) => ({ device_id: r.id, name: r.name, plate: r.plate || null, membership_expires: r.membership_expires, minutes_since_last_report: r.reported ? Math.round((Date.now() - new Date(String(r.reported)).getTime()) / 60_000) : "never" })) };
       }),
-    set_client_active: async ({ email, active, confirmed }) => {
+    set_client_active: async ({ email, active }) => {
       const mail = String(email ?? "").trim().toLowerCase();
       const { setUserActive, userIdByEmail } = await import("../gpswox");
       if (!mail || !(await userIdByEmail(mail).catch(() => null))) return { error: "No client account with that email" };
-      if (confirmed !== true) return needsConfirmation(`${active === true ? "Activate" : "Suspend"} the account ${mail}`);
+      const action = `${active === true ? "Activate" : "Suspend"} the account ${mail}`;
+      if (!ownerApproved(userId, action, ownerMessage)) return needsConfirmation(action);
       // A white-label client is blocked/unblocked like the company panel does, so the panel shows "Desbloquear".
       const client = await prisma.endClient.findFirst({ where: { email: mail, goneAt: null }, include: { company: true } });
       if (client) {
@@ -217,10 +230,11 @@ function adminTools(): Record<string, (args: Record<string, unknown>) => Promise
       } else await setUserActive(mail, active === true);
       return { status: active === true ? "activated" : "suspended", email: mail };
     },
-    extend_membership: async ({ device_id, months, confirmed }) => {
+    extend_membership: async ({ device_id, months }) => {
       const n = Number(months);
       if (!Number.isInteger(n) || n < 1 || n > 36) return { error: "Months must be between 1 and 36" };
-      if (confirmed !== true) return needsConfirmation(`Extend the membership of device ${Number(device_id)} by ${n} months`);
+      const action = `Extend the membership of device ${Number(device_id)} by ${n} months`;
+      if (!ownerApproved(userId, action, ownerMessage)) return needsConfirmation(action);
       const current = await withGpswoxDb(async (conn) => {
         const [rows] = await conn.query<RowDataPacket[]>("SELECT name, IF(expiration_date > '2000-01-01', DATE_FORMAT(expiration_date, '%Y-%m-%dT%H:%i:%sZ'), NULL) AS exp FROM devices WHERE id = ? AND deleted = 0", [Number(device_id)]);
         return rows[0] ?? null;
@@ -301,7 +315,17 @@ async function withPlatform(own: gps.Vehicle[]): Promise<gps.Vehicle[]> {
 
 export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => void = () => {}, opts: { allVehicles?: boolean } = {}) {
   let cachedVehicles: gps.Vehicle[] | null = null;
-  const fleet = async () => (cachedVehicles ??= opts.allVehicles ? await withPlatform(await gps.vehicles(user.hash)) : await gps.vehicles(user.hash));
+  let ownIds = new Set<number>();
+  const fleet = async () => {
+    if (!cachedVehicles) {
+      const own = await gps.vehicles(user.hash);
+      ownIds = new Set(own.map((v) => v.id));
+      cachedVehicles = opts.allVehicles ? await withPlatform(own) : own;
+    }
+    return cachedVehicles;
+  };
+  // Owner mode also sees other accounts' vehicles; account-bound actions only take the user's own ones.
+  const isOwn = async (id: number) => (await fleet(), ownIds.has(Number(id)));
   const profileCache = new Map<number, VehicleProfile>();
   const profilesFor = async (ids: number[]) => {
     const missing = ids.filter((id) => !profileCache.has(id));
@@ -363,7 +387,7 @@ export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => 
       return { device_id: v.id, name: v.name, ...h };
     },
   };
-  return { tools, find };
+  return { tools, find, isOwn };
 }
 
 // Sends one vehicle's location to the customer's own WhatsApp (profile number + linked numbers). Used by the assistant and Google Home.
@@ -412,7 +436,7 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
   const addAction = (a: AiAction) => {
     if (!actions.some((x) => x.type === a.type && x.device_id === a.device_id)) actions.push(a);
   };
-  const { tools: readOnly, find } = readTools(user, lang, addAction, { allVehicles: input.admin });
+  const { tools: readOnly, find, isOwn } = readTools(user, lang, addAction, { allVehicles: input.admin });
   // On WhatsApp a customer without a PIN creates it by replying to the confirmation.
   const pinReady = async () => channel === "whatsapp" || (await hasPin(user.userId));
   const pinStatus = async () => ((await hasPin(user.userId)) ? "awaiting_pin_confirmation" : "awaiting_new_pin: the customer has no PIN yet; tell them to reply with a new PIN of 4 to 6 digits, it is saved and confirms this order");
@@ -484,7 +508,7 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
     const { formatMoney } = await import("../format");
     return { vehicle: v.name, amount: formatMoney(renewal.amountCents, renewal.currency), includes_reactivation: renewal.reactivation, payment_url: url, after_payment: `The membership renews for 1 year as soon as the payment is confirmed. ${renewal.reactivation ? REACTIVATION_NOTE : ""}`.trim() };
   };
-  if (input.admin) Object.assign(tools, adminTools());
+  if (input.admin) Object.assign(tools, adminTools(user.userId, input.message));
   if (channel === "whatsapp") {
     tools.activate_device = async ({ imei, model, name }) => {
       const code = String(imei ?? "").replace(/\D/g, "");
