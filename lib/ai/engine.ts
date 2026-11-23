@@ -43,8 +43,15 @@ function localNow(): string {
   return new Date().toLocaleString("sv-SE", { timeZone: "America/Santo_Domingo" }).slice(0, 16);
 }
 
-function systemPrompt(assistantName: string, companyName: string, lang: Lang, deviceId: number | null, channel: Channel, spoken = false): string {
+function greetRule(greet: string | null | undefined, lang: Lang): string {
+  if (greet === undefined || greet === null) return "";
+  const hello = lang === "en" ? `Hi${greet ? ` ${greet}` : ""}` : `Hola${greet ? ` ${greet}` : ""}`;
+  return `This is the first message of the conversation: start your reply with "${hello}". If the customer did not say which vehicle and has more than one, call list_vehicles and ask which one they want to know about, naming each by make plus color or type (e.g. "¿De cuál de tus vehículos quieres saber: el Toyota, la Honda negra o el motor?"); if they have only one, give its details right away.`;
+}
+
+function systemPrompt(assistantName: string, companyName: string, lang: Lang, deviceId: number | null, channel: Channel, spoken = false, greet?: string | null): string {
   return [
+    greetRule(greet, lang),
     `You are "${assistantName}", the vehicle tracking assistant of ${companyName}. Reply in ${lang === "en" ? "English" : "Spanish (Dominican Republic, tú)"}.`,
     `Current local time (America/Santo_Domingo): ${localNow()}.`,
     "You only know the customer's own vehicles, through the tools. Never invent locations, speeds or data; if a tool fails, say so.",
@@ -219,7 +226,7 @@ export async function sendLocationWhatsApp(user: AiUser, v: gps.Vehicle, lang: L
   return sentTo.length ? { status: "sent", to: `WhatsApp ending in ${sentTo.join(", ")}` } : { error: "The WhatsApp message could not be sent now (WhatsApp not connected). Tell the customer to try later." };
 }
 
-export async function chat(input: { user: AiUser; conversationId: string | null; message: string; lang: Lang; deviceId: number | null; channel: Channel; spoken?: boolean }): Promise<ChatResult> {
+export async function chat(input: { user: AiUser; conversationId: string | null; message: string; lang: Lang; deviceId: number | null; channel: Channel; spoken?: boolean; greet?: string | null }): Promise<ChatResult> {
   const { user, lang, channel } = input;
   const setting = await aiSetting();
   const config = await assistantConfig(user, lang);
@@ -280,7 +287,7 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
   };
   const VOICE_BLOCKED = ["request_engine_command", "activate_red_zone"];
   if (voice) for (const name of VOICE_BLOCKED) delete tools[name];
-  const messages: Msg[] = [{ role: "system", content: systemPrompt(config.name, config.companyName, lang, input.deviceId, channel, input.spoken) }, ...past, { role: "user", content: input.message }];
+  const messages: Msg[] = [{ role: "system", content: systemPrompt(config.name, config.companyName, lang, input.deviceId, channel, input.spoken, input.greet) }, ...past, { role: "user", content: input.message }];
   // Remote channels (WhatsApp, Alexa) think with Gemini when configured; in-platform chat stays on OpenAI.
   let provider: Provider = (channel === "whatsapp" || channel === "alexa") && process.env.GEMINI_API_KEY ? "gemini" : "openai";
   let reply = "";

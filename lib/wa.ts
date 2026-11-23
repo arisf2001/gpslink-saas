@@ -17,6 +17,9 @@ const CONFIRM_MS = 2 * 60_000;
 export const DIRECT_WA = "gpslink";
 // Owner's own number linked by QR: only sends notices/invoices, never answers.
 export const OWNER_WA = "gpslinkowner";
+// The owner's official Meta number (shared by his brands): the credit-saas bot forwards GPS Link customers' messages here.
+export const META_WA = "gpslinkmeta";
+const GREET_AFTER_MS = 12 * 3600_000;
 
 export const internalKey = () => createHmac("sha256", secret()).update("gpslink-wa-internal").digest("hex");
 
@@ -112,10 +115,10 @@ async function idsByPhone(phone: string): Promise<number[]> {
   return [...new Set([...track, ...saas])];
 }
 
-async function linkFromProfile(phone: string): Promise<boolean> {
+async function linkFromProfile(key: string, phone: string): Promise<boolean> {
   if (phone.length < 8) return false;
   const ids = await idsByPhone(phone).catch((): number[] => []);
-  const link = await prisma.waLink.findUnique({ where: { companyId_phone: { companyId: OWNER_WA, phone } } });
+  const link = await prisma.waLink.findUnique({ where: { companyId_phone: { companyId: key, phone } } });
   if (!ids.length) {
     if (link) await prisma.waLink.delete({ where: { id: link.id } });
     return false;
@@ -125,17 +128,24 @@ async function linkFromProfile(phone: string): Promise<boolean> {
   const hash = await userApiHash(ids[0]).catch(() => null);
   const user = hash ? await resolveUser(hash).catch(() => null) : null;
   if (!user) return false;
-  await linkPhone(OWNER_WA, phone, user);
+  await linkPhone(key, phone, user);
   return true;
 }
 
-export async function handleIncoming(companyId: string, phone: string, text: string, opts: { voice?: boolean; links?: string[] } = {}): Promise<string | null> {
-  const owner = companyId === OWNER_WA;
+// First name to greet with: the gpslinkusa.com company contact, else the name on the person's WhatsApp profile.
+async function firstName(gpswoxUserId: number, profileName: string | null | undefined): Promise<string> {
+  const company = await prisma.company.findFirst({ where: { gpswoxUserId }, select: { contactName: true } }).catch(() => null);
+  const name = (company?.contactName || profileName || "").replace(/[^\p{L}\s'.-]/gu, " ").trim();
+  return name.split(/\s+/)[0]?.slice(0, 30) ?? "";
+}
+
+export async function handleIncoming(companyId: string, phone: string, text: string, opts: { voice?: boolean; links?: string[]; name?: string | null } = {}): Promise<string | null> {
+  const owner = companyId === OWNER_WA || companyId === META_WA;
   const direct = companyId === DIRECT_WA || owner;
   const company = direct ? null : await prisma.company.findUnique({ where: { id: companyId } });
   if (direct ? !(await aiSetting()).enabled : !company || !company.aiEnabled || company.status === "BLOCKED" || company.status === "CANCELED") return null;
   // The owner's business number only answers platform users, matched by the phone in their profile (no linking step).
-  if (owner && !(await linkFromProfile(phone))) return null;
+  if (owner && !(await linkFromProfile(companyId, phone))) return null;
   const brand = company?.name ?? "GPS Link";
   const message = text.trim().slice(0, 1000);
   if (!message) return opts.voice ? "No pude entender la nota de voz. Intenta otra vez o escríbeme." : "Por ahora solo entiendo mensajes de texto y notas de voz.";
@@ -171,7 +181,9 @@ export async function handleIncoming(companyId: string, phone: string, text: str
     return "Listo, cancelé la orden. No se envió nada al vehículo.";
   }
 
-  const result = await chat({ user, conversationId: link.conversationId, message, lang: "es", deviceId: null, channel: "whatsapp", spoken: opts.voice });
+  const fresh = await prisma.waLink.findUnique({ where: { id: link.id }, select: { conversationId: true, updatedAt: true } });
+  const greet = companyId === META_WA && (!fresh?.conversationId || Date.now() - fresh.updatedAt.getTime() > GREET_AFTER_MS) ? await firstName(user.userId, opts.name) : null;
+  const result = await chat({ user, conversationId: greet === null ? link.conversationId : null, message, lang: "es", deviceId: null, channel: "whatsapp", spoken: opts.voice, greet });
   await prisma.waLink.update({
     where: { id: link.id },
     data: { conversationId: result.conversation_id, pendingToken: result.confirm ? seal(result.confirm.token) : null, pendingUntil: result.confirm ? new Date(Date.now() + CONFIRM_MS) : null },

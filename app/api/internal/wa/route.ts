@@ -14,7 +14,7 @@ export async function POST(req: Request) {
   let text = typeof body.text === "string" ? body.text : "";
   if (voice) text = await transcribe(Buffer.from(body.audio, "base64"), typeof body.mime === "string" ? body.mime : "audio/ogg").catch((e) => (console.error("[wa] transcribe", e), ""));
   const links: string[] = [];
-  const reply = await handleIncoming(body.companyId, body.phone.replace(/\D/g, ""), text, { voice, links }).catch(fail);
+  const reply = await handleIncoming(body.companyId, body.phone.replace(/\D/g, ""), text, { voice, links, name: typeof body.name === "string" ? body.name.slice(0, 80) : null }).catch(fail);
   const link = links.length ? links.join("\n") : null;
   if (!voice || !reply || /https?:\/\//.test(reply)) return Response.json({ reply: reply && link ? `${reply}\n${link}` : reply });
   const audio = await speech(reply).catch((e) => (console.error("[wa] speech", e), null));

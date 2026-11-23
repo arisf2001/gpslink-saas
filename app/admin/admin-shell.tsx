@@ -24,6 +24,7 @@ export async function AdminShell({ children }: { children: React.ReactNode }) {
             <Link href="/admin/activacion">Activación</Link>
             <Link href="/admin/ia">Asistente IA</Link>
             <Link href="/admin/whatsapp">WhatsApp</Link>
+            <Link href="/admin/seguridad">Seguridad</Link>
             <Link href="/admin/tickets">Tickets{openTickets ? ` (${openTickets})` : ""}</Link>
             <PushButton publicKey={vapidPublicKey()} />
             <form action={adminLogoutAction}><button className="btn sm s">Salir</button></form>
