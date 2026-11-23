@@ -208,7 +208,7 @@ export async function handleIncoming(companyId: string, phone: string, text: str
   });
   let reply = result.reply;
   // Official Meta number: a last "OPCIONES: a | b" line becomes tap buttons/list there; elsewhere it is just dropped.
-  const picked = /\n?\s*OPCIONES:\s*(.+)\s*$/i.exec(reply);
+  const picked = /(?:^|\n)[ \t]*OPCIONES:[ \t]*([^\n]+?)\s*$/.exec(reply);
   if (picked) {
     reply = reply.slice(0, picked.index).trim();
     if (opts.options) opts.options.push(...picked[1].split("|").map((o) => o.trim().slice(0, 24)).filter(Boolean).slice(0, 10));
