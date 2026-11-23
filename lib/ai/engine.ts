@@ -391,7 +391,7 @@ export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => 
 }
 
 // Sends one vehicle's location to the customer's own WhatsApp (profile number + linked numbers). Used by the assistant and Google Home.
-export async function sendLocationWhatsApp(user: AiUser, v: gps.Vehicle, lang: Lang): Promise<{ status: "sent"; to: string } | { error: string }> {
+export async function sendLocationWhatsApp(user: AiUser, v: gps.Vehicle, lang: Lang, onlyTo?: string): Promise<{ status: "sent"; to: string } | { error: string }> {
   const { DIRECT_WA, queueWa, waNumber } = await import("../wa");
   const { sendWhatsApp } = await import("../notify");
   const { userPhone } = await import("../gpswox");
@@ -400,6 +400,12 @@ export async function sendLocationWhatsApp(user: AiUser, v: gps.Vehicle, lang: L
   const profile = waNumber(await userPhone(user.userId).catch(() => null));
   if (profile) targets.set(profile, brandId ?? DIRECT_WA);
   for (const l of await prisma.waLink.findMany({ where: { gpswoxUserId: user.userId } })) if (!targets.has(l.phone)) targets.set(l.phone, l.companyId);
+  if (onlyTo) {
+    const { OWNER_WA } = await import("../wa");
+    const only = waNumber(onlyTo);
+    targets.clear();
+    if (only) targets.set(only, OWNER_WA);
+  }
   if (!targets.size) return { error: "This account has no WhatsApp number: tell the customer to add their WhatsApp number (with country code) in their profile on the tracking platform, then ask again." };
   const place = await reverseGeocode(v.lat, v.lng, lang);
   const where = place ? [place.street, place.neighbourhood, place.city, place.state].filter(Boolean).join(", ") : v.address ?? `${v.lat}, ${v.lng}`;
@@ -540,6 +546,11 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
   tools.send_location_whatsapp = async ({ device_id }) => {
     const v = await find(Number(device_id));
     if (!v) return { error: "Vehicle not found among the customer's vehicles" };
+    // Another account's vehicle in owner mode: only to the owner's own number.
+    if (input.admin && !(await isOwn(v.id))) {
+      const { BRAND } = await import("../config");
+      return sendLocationWhatsApp(user, v, lang, BRAND.ownerWhatsApp);
+    }
     return sendLocationWhatsApp(user, v, lang);
   };
   const VOICE_BLOCKED = ["request_engine_command", "activate_red_zone"];
