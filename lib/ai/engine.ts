@@ -508,8 +508,13 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
     const { ensureRenewal, renewalGhlUrl, REACTIVATION_NOTE } = await import("../sim/notify");
     const renewal = await ensureRenewal(card);
     if (!renewal) return { error: "No renewal price on file for this vehicle. Do not give any link: tell the customer the team will send the payment link" };
-    const name = await customerName(user.userId).catch(() => null);
-    const url = await renewalGhlUrl(renewal, card, { name: name ? `${name.first} ${name.last}`.trim() : user.email, email: user.email, phone: card.ownerPhone }).catch(() => null);
+    // Owner mode on a client's vehicle: the invoice is in the client's name, not the owner's.
+    const own = await isOwn(v.id);
+    const payer = own ? user.userId : (card.ownerUserId ?? null);
+    const email = own ? user.email : card.ownerEmail;
+    if (!email) return { error: "This vehicle's account has no email on file. Do not give any link: tell the owner to add it first" };
+    const name = payer ? await customerName(payer).catch(() => null) : null;
+    const url = await renewalGhlUrl(renewal, card, { name: name ? `${name.first} ${name.last}`.trim() : (card.customerName ?? email), email, phone: card.ownerPhone }).catch(() => null);
     if (!url) return { error: "The payment link could not be created now. Do not give any link: tell the customer the team will send it" };
     const { formatMoney } = await import("../format");
     return { vehicle: v.name, amount: formatMoney(renewal.amountCents, renewal.currency), includes_reactivation: renewal.reactivation, payment_url: url, after_payment: `The membership renews for 1 year as soon as the payment is confirmed. ${renewal.reactivation ? REACTIVATION_NOTE : ""}`.trim() };
