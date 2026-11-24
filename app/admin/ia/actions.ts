@@ -29,13 +29,17 @@ export async function setCompanyAiAction(formData: FormData) {
   const color = String(formData.get("brandColor") ?? "").trim();
   const id = String(formData.get("companyId"));
   const aiEnabled = formData.get("aiEnabled") === "on";
-  const current = await prisma.company.findUnique({ where: { id }, select: { aiFreeUntil: true } });
-  // The first time the owner turns the AI on, its first 3 months are free.
+  const current = await prisma.company.findUnique({ where: { id }, select: { aiEnabled: true, aiFreeUntil: true } });
+  // The first time the owner turns the AI on, its first 3 months are free (Jan 31 + 3 months = Apr 30).
   const free = new Date();
+  const day = free.getDate();
+  free.setDate(1);
   free.setMonth(free.getMonth() + AI_FREE_MONTHS);
+  free.setDate(Math.min(day, new Date(free.getFullYear(), free.getMonth() + 1, 0).getDate()));
+  const firstTime = aiEnabled && current?.aiEnabled === false && !current.aiFreeUntil;
   await prisma.company.update({
     where: { id },
-    data: { aiEnabled, ...(aiEnabled && !current?.aiFreeUntil ? { aiFreeUntil: free } : {}), aiName: String(formData.get("aiName") ?? "").trim().slice(0, 60) || null, brandColor: /^#[0-9a-fA-F]{6}$/.test(color) ? color : null },
+    data: { aiEnabled, ...(firstTime ? { aiFreeUntil: free } : {}), aiName: String(formData.get("aiName") ?? "").trim().slice(0, 60) || null, brandColor: /^#[0-9a-fA-F]{6}$/.test(color) ? color : null },
   });
   redirect("/admin/ia?ok=Empresa actualizada");
 }
