@@ -1,7 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { mapUrl } from "@/lib/ai/gps";
-import { alertKey, OWNER_WA, queueWa, waNumber } from "@/lib/wa";
+import { alertKey, waNumber } from "@/lib/wa";
+import { sendWhatsApp } from "@/lib/notify";
 
 type AlertEvent = {
   message?: string;
@@ -34,5 +35,5 @@ export async function POST(req: Request) {
     Number(e.speed) > 0 ? `Velocidad: ${Math.round(Number(e.speed))} km/h` : "",
     Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng) ? `Ver en el mapa: ${mapUrl(lat, lng)}` : "",
   ].filter(Boolean).join("\n");
-  return Response.json({ ok: await queueWa(OWNER_WA, phone, text) });
+  return Response.json({ ok: (await sendWhatsApp(phone, text)).ok });
 }

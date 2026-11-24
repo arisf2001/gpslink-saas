@@ -401,7 +401,7 @@ export function readTools(user: AiUser, lang: Lang, addAction: (a: AiAction) => 
 
 // Sends one vehicle's location to the customer's own WhatsApp (profile number + linked numbers). Used by the assistant and Google Home.
 export async function sendLocationWhatsApp(user: AiUser, v: gps.Vehicle, lang: Lang, onlyTo?: string): Promise<{ status: "sent"; to: string } | { error: string }> {
-  const { DIRECT_WA, queueWa, waNumber } = await import("../wa");
+  const { DIRECT_WA, OWNER_WA, queueWa, waNumber } = await import("../wa");
   const { sendWhatsApp } = await import("../notify");
   const { userPhone } = await import("../gpswox");
   const brandId = user.company && user.company.status !== "CANCELED" ? user.company.id : null;
@@ -410,7 +410,6 @@ export async function sendLocationWhatsApp(user: AiUser, v: gps.Vehicle, lang: L
   if (profile) targets.set(profile, brandId ?? DIRECT_WA);
   for (const l of await prisma.waLink.findMany({ where: { gpswoxUserId: user.userId } })) if (!targets.has(l.phone)) targets.set(l.phone, l.companyId);
   if (onlyTo) {
-    const { OWNER_WA } = await import("../wa");
     const only = waNumber(onlyTo);
     targets.clear();
     if (only) targets.set(only, OWNER_WA);
@@ -431,7 +430,7 @@ export async function sendLocationWhatsApp(user: AiUser, v: gps.Vehicle, lang: L
   const text = [`*${v.name}${v.plate ? ` (${v.plate})` : ""}*`, `${t(lang, "Ubicación", "Location")}: ${where}`, inside, near, `${t(lang, "Velocidad", "Speed")}: ${v.speed} ${v.speedUnit}`, ago ? `${t(lang, "Último reporte", "Last report")}: ${t(lang, "hace", "")} ${ago}${t(lang, "", " ago")}`.replace(/\s+/g, " ") : "", gps.mapUrl(v.lat, v.lng)].filter(Boolean).join("\n");
   const sentTo: string[] = [];
   for (const [phone, companyId] of targets) {
-    const viaBrand = companyId !== DIRECT_WA && (await queueWa(companyId, phone, text).catch(() => false));
+    const viaBrand = companyId !== DIRECT_WA && companyId !== OWNER_WA && (await queueWa(companyId, phone, text).catch(() => false));
     const ok = viaBrand || (await sendWhatsApp(phone, text).catch(() => ({ ok: false }))).ok;
     if (ok) sentTo.push(`…${phone.slice(-4)}`);
   }

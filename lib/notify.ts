@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import { BRAND } from "./config";
 import { metaConfig, metaSend } from "./meta";
-import { OWNER_WA, queueWa } from "./wa";
+import { metaRelay, OWNER_WA, queueWa } from "./wa";
 
 export type ChannelResult = { channel: "email" | "whatsapp"; ok: boolean; error?: string };
 
@@ -49,6 +49,8 @@ export async function sendWhatsApp(phone: string, text: string): Promise<Channel
   if (meta) return { channel: "whatsapp", ...(await metaSend(meta, phone, text, { template: true })) };
   const { WHATSAPP_TOKEN, WHATSAPP_PHONE_ID, WHATSAPP_TEMPLATE, WHATSAPP_TEMPLATE_LANG } = process.env;
   if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
+    // Customer wrote to the official number in the last 23 h: Meta (free); otherwise the owner's QR number.
+    if (await metaRelay(phone, text).catch(() => false)) return { channel: "whatsapp", ok: true };
     if (await queueWa(OWNER_WA, phone, text).catch(() => false)) return { channel: "whatsapp", ok: true };
     console.log(`[whatsapp:dev] to=${phone} text=${text.slice(0, 80)}`);
     return { channel: "whatsapp", ok: false, error: "WhatsApp no configurado" };

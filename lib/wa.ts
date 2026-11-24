@@ -86,10 +86,29 @@ export function waNumber(phone: string | null | undefined): string | null {
 export async function queueWa(companyId: string, phone: string | null | undefined, text: string): Promise<boolean> {
   const number = waNumber(phone);
   if (!number) return false;
+  if (companyId === OWNER_WA && !(await ownerQrAllowed(number))) return false;
   const session = await prisma.waSession.findUnique({ where: { companyId } });
   if (session?.status !== "CONNECTED") return false;
   await prisma.waOutbox.create({ data: { companyId, phone: number, text } });
   return true;
+}
+
+let allowed: { at: number; phones: Set<string> } | null = null;
+// The owner's QR number only writes to GPS Link customers (a phone in their profile) and to the admin.
+export async function ownerQrAllowed(number: string): Promise<boolean> {
+  if (number === waNumber(BRAND.ownerWhatsApp)) return true;
+  if (!allowed || Date.now() - allowed.at > 5 * 60_000) allowed = { at: Date.now(), phones: new Set(await profilePhones()) };
+  return allowed.phones.has(number);
+}
+
+// The official Meta number lives in credit-saas: it sends only while the customer's chat there is open (last message < 23 h, no charge).
+export async function metaRelay(phone: string, text: string): Promise<boolean> {
+  const number = waNumber(phone);
+  const url = process.env.META_RELAY_URL ?? "https://app.disputacredit.com/api/webhook/gpslink";
+  if (!number || url === "off") return false;
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "x-wa-key": internalKey() }, body: JSON.stringify({ phone: number, text }), signal: AbortSignal.timeout(20_000) }).catch(() => null);
+  const data = r?.ok ? ((await r.json().catch(() => null)) as { ok?: boolean } | null) : null;
+  return data?.ok === true;
 }
 
 export async function linkPhone(companyId: string, phone: string, user: AiUser) {
