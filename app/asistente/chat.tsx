@@ -36,7 +36,10 @@ export function AssistantChat({ panel, suggestions }: { panel?: Panel; suggestio
       setMsgs([{ role: "assistant", text: data.greeting }]);
     });
   }, [panel]);
-  useEffect(() => end.current?.scrollIntoView({ behavior: "smooth" }), [msgs, confirm]);
+  // Block body: newer Chrome returns a Promise from scrollIntoView, and React would call it as the effect cleanup.
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs, confirm]);
 
   async function send(message: string) {
     if (!message.trim() || busy) return;
