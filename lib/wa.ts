@@ -94,10 +94,13 @@ export async function queueWa(companyId: string, phone: string | null | undefine
 }
 
 let allowed: { at: number; phones: Set<string> } | null = null;
-// The owner's QR number only writes to GPS Link customers (a phone in their profile) and to the admin.
+// The owner's QR number only writes to GPS Link customers (a phone in their profile or a linked WhatsApp) and to the admin.
 export async function ownerQrAllowed(number: string): Promise<boolean> {
   if (number === waNumber(BRAND.ownerWhatsApp)) return true;
-  if (!allowed || Date.now() - allowed.at > 5 * 60_000) allowed = { at: Date.now(), phones: new Set(await profilePhones()) };
+  if (!allowed || Date.now() - allowed.at > 5 * 60_000) {
+    const links = await prisma.waLink.findMany({ select: { phone: true } });
+    allowed = { at: Date.now(), phones: new Set([...(await profilePhones()), ...links.map((l) => waNumber(l.phone)).filter((p): p is string => !!p)]) };
+  }
   return allowed.phones.has(number);
 }
 
