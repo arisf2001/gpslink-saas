@@ -76,9 +76,10 @@ const sameText = (x: string, y: string) => {
 export function adminCredentialsMatch(username: string, password: string): boolean {
   const expectedUser = process.env.ADMIN_USERNAME ?? "";
   const expectedPass = process.env.ADMIN_PASSWORD ?? "";
-  if (!expectedUser || !expectedPass) return false;
+  if (!expectedPass) return false;
   const email = (process.env.ADMIN_EMAIL || "arisf2001@gmail.com").trim().toLowerCase();
   const user = username.trim();
-  const userOk = sameText(user, expectedUser) || sameText(user.toLowerCase(), email);
+  if (!user) return false;
+  const userOk = (!!expectedUser && sameText(user, expectedUser)) || sameText(user.toLowerCase(), email);
   return sameText(password, expectedPass) && userOk;
 }
