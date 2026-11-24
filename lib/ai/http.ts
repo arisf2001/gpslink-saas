@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { prisma } from "../db";
 import { getSession } from "../session";
+import { hiddenTabSet } from "../tabs";
 import { assistantConfig, resolveUser, t, type AiUser, type AssistantConfig, type Channel, type Lang } from "./assistant";
 import { SessionError } from "./gps";
 import type { Scope } from "./manage";
@@ -14,8 +15,8 @@ async function panelAccount(panel: string): Promise<{ hash: string; scope: Scope
     return hash ? { hash, scope: { kind: "owner" } } : null;
   }
   const id = await getSession("company");
-  const company = id ? await prisma.company.findUnique({ where: { id }, select: { id: true, gpswoxUserId: true } }) : null;
-  if (!company?.gpswoxUserId) return null;
+  const company = id ? await prisma.company.findUnique({ where: { id }, select: { id: true, gpswoxUserId: true, hiddenTabs: true } }) : null;
+  if (!company?.gpswoxUserId || hiddenTabSet(company.hiddenTabs).has("asistente")) return null;
   const hash = await userApiHash(company.gpswoxUserId).catch(() => null);
   return hash ? { hash, scope: { kind: "company", companyId: company.id, gpswoxUserId: company.gpswoxUserId } } : null;
 }
