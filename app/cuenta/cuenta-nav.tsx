@@ -7,6 +7,7 @@ const LINKS = [
   { key: "cuenta", href: "/cuenta", label: "Mi cuenta" },
   { key: "clientes", href: "/cuenta/clientes", label: "Mis clientes" },
   { key: "equipos", href: "/cuenta/equipos", label: "Mis equipos" },
+  { key: "asistente", href: "/cuenta/asistente", label: "Asistente" },
   { key: "planes", href: "/cuenta/planes", label: "Mis planes" },
   { key: "permisos", href: "/cuenta/permisos", label: "Qué ven mis clientes" },
   { key: "whatsapp", href: "/cuenta/whatsapp", label: "Mi WhatsApp" },
