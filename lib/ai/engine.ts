@@ -472,15 +472,13 @@ export async function chat(input: { user: AiUser; conversationId: string | null;
     }
     const ignition = k.startsWith("ignition") ? await ensureIgnition(v.id) : null;
     if (ignition === "failed") return { error: "Could not prepare this GPS to read the ignition; tell them the team will check it" };
+    if (ignition === "no_signal") return { error: "This GPS does not send the ignition signal, so an ignition alert would never fire. Nothing was created: tell them to connect the GPS ignition (ACC) wire and ask again once it reports" };
     const { alertKey } = await import("../wa");
     const { appUrl } = await import("../config");
     const hook = `${appUrl()}/api/gpswox/alert?u=${target.userId}&k=${alertKey(target.userId)}`;
     const r = await gps.addAlert(target.hash, v.id, k, `${label} - ${v.name}`.slice(0, 90), value, hook);
     if (!r.ok) return { error: `Could not create the alert: ${r.error}` };
-    return {
-      status: "created", vehicle: v.name, alert: label, delivery: own ? "app and WhatsApp" : "the client's app and WhatsApp",
-      ...(ignition === "no_signal" ? { warning: "This GPS does not send the ignition signal, so this alert will not fire until its ignition (ACC) wire is connected. Say it." } : {}),
-    };
+    return { status: "created", vehicle: v.name, alert: label, delivery: own ? "app and WhatsApp" : "the client's app and WhatsApp" };
   };
   tools.membership_payment_link = async ({ device_id }) => {
     const v = await find(Number(device_id));
