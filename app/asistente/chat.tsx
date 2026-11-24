@@ -117,10 +117,11 @@ export function AssistantChat({ panel, suggestions }: { panel?: Panel; suggestio
           {(suggestions ?? config.suggestions).map((s) => <button key={s} className="ia-chip" onClick={() => send(s)}>{s}</button>)}
         </div>
       )}
-      <form className="ia-input" onSubmit={(e) => { e.preventDefault(); send(text); }}>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Escribe tu pregunta…" maxLength={1000} />
-        <button className="btn sm" style={{ background: color }} disabled={busy || !text.trim()}>Enviar</button>
-      </form>
+      {/* No <form>: if the page is not interactive yet, Enter must not reload it. */}
+      <div className="ia-input">
+        <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); send(text); } }} placeholder="Escribe tu pregunta…" maxLength={1000} enterKeyHint="send" />
+        <button type="button" className="btn sm" style={{ background: color }} disabled={busy || !text.trim()} onClick={() => send(text)}>Enviar</button>
+      </div>
     </div>
   );
 }
