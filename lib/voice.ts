@@ -48,3 +48,24 @@ export async function speech(text: string): Promise<Buffer> {
   if (!res.ok) throw new Error(`OpenAI speech ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return toVoiceNote(Buffer.from(await res.arrayBuffer()));
 }
+
+// Photo of a GPS label: the IMEI (or device ID) printed on it, read with OpenAI vision; null when none is legible.
+export async function readImei(image: Buffer, mime = "image/jpeg"): Promise<string | null> {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key()}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: process.env.OPENAI_VISION_MODEL || "gpt-4o-mini",
+      messages: [{ role: "user", content: [
+        { type: "text", text: "This is a photo of a GPS tracker or its box/label. Reply only with the IMEI (15 digits) or, if there is no IMEI, the device ID number printed on it. Digits only. Reply NONE if no such number is legible." },
+        { type: "image_url", image_url: { url: `data:${mime.split(";")[0]};base64,${image.toString("base64")}` } },
+      ] }],
+      max_tokens: 30,
+    }),
+    signal: AbortSignal.timeout(60_000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`OpenAI vision ${res.status}: ${data?.error?.message ?? "error"}`);
+  const digits = String(data?.choices?.[0]?.message?.content ?? "").replace(/\D/g, "");
+  return /^\d{10,17}$/.test(digits) ? digits : null;
+}

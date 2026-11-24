@@ -7,12 +7,16 @@ type Confirm = { token: string; command: string; device_id: number; device_name:
 type Msg = { role: "user" | "assistant"; text: string; actions?: Action[] };
 type Config = { enabled: boolean; assistant_name: string; brand_color: string; greeting: string; suggestions: string[]; has_pin: boolean };
 
-async function api<T>(path: string, body?: Record<string, unknown>): Promise<{ status: number; data: T & { message?: string } }> {
-  const res = await fetch(`/api/ia/v1/${path}`, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : undefined);
+type Panel = "admin" | "company" | undefined;
+
+async function api<T>(path: string, body?: Record<string, unknown>, panel?: Panel): Promise<{ status: number; data: T & { message?: string } }> {
+  const headers: Record<string, string> = panel ? { "x-panel": panel } : {};
+  const res = await fetch(`/api/ia/v1/${path}`, body ? { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body) } : { headers });
   return { status: res.status, data: await res.json().catch(() => ({})) };
 }
 
-export function AssistantChat() {
+// panel: the owner panel or a white label panel (their own login, admin tools); otherwise the customer web assistant.
+export function AssistantChat({ panel, suggestions }: { panel?: Panel; suggestions?: string[] } = {}) {
   const [config, setConfig] = useState<Config | null>(null);
   const [error, setError] = useState("");
   const [msgs, setMsgs] = useState<Msg[]>([]);
@@ -26,20 +30,23 @@ export function AssistantChat() {
   const end = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    api<Config>("config").then(({ status, data }) => {
+    api<Config>("config", undefined, panel).then(({ status, data }) => {
       if (status !== 200) return setError(data.message ?? "No se pudo abrir el asistente.");
       setConfig(data);
       setMsgs([{ role: "assistant", text: data.greeting }]);
     });
-  }, []);
-  useEffect(() => end.current?.scrollIntoView({ behavior: "smooth" }), [msgs, confirm]);
+  }, [panel]);
+  // Block body: newer Chrome returns a Promise from scrollIntoView, and React would call it as the effect cleanup.
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs, confirm]);
 
   async function send(message: string) {
     if (!message.trim() || busy) return;
     setText("");
     setMsgs((m) => [...m, { role: "user", text: message }]);
     setBusy(true);
-    const { status, data } = await api<{ conversation_id: string; reply: string; actions: Action[]; confirm: Confirm | null }>("chat", { message, conversation_id: conversation, lang: "es" });
+    const { status, data } = await api<{ conversation_id: string; reply: string; actions: Action[]; confirm: Confirm | null }>("chat", { message, conversation_id: conversation, lang: "es" }, panel);
     setBusy(false);
     if (status !== 200) return setMsgs((m) => [...m, { role: "assistant", text: data.message ?? "No pude responder, intenta otra vez." }]);
     setConversation(data.conversation_id);
@@ -51,7 +58,7 @@ export function AssistantChat() {
   async function doConfirm() {
     if (!confirm) return;
     setBusy(true);
-    const { data } = await api<{ ok: boolean; reply: string }>("confirm", { token: confirm.token, pin, lang: "es" });
+    const { data } = await api<{ ok: boolean; reply: string }>("confirm", { token: confirm.token, pin, lang: "es" }, panel);
     setBusy(false);
     setPin("");
     setMsgs((m) => [...m, { role: "assistant", text: data.reply ?? data.message ?? "" }]);
@@ -59,7 +66,7 @@ export function AssistantChat() {
   }
 
   async function savePin() {
-    const { data } = await api<{ ok: boolean; reply: string }>("pin", { password: pinForm.password, pin: pinForm.pin, lang: "es" });
+    const { data } = await api<{ ok: boolean; reply: string }>("pin", { password: pinForm.password, pin: pinForm.pin, lang: "es" }, panel);
     setPinForm({ password: "", pin: "", msg: data.reply ?? data.message ?? "" });
     if (data.ok) setConfig((c) => (c ? { ...c, has_pin: true } : c));
   }
@@ -110,13 +117,14 @@ export function AssistantChat() {
       </div>
       {msgs.length <= 1 && (
         <div className="ia-actions" style={{ padding: "0 14px" }}>
-          {config.suggestions.map((s) => <button key={s} className="ia-chip" onClick={() => send(s)}>{s}</button>)}
+          {(suggestions ?? config.suggestions).map((s) => <button key={s} className="ia-chip" onClick={() => send(s)}>{s}</button>)}
         </div>
       )}
-      <form className="ia-input" onSubmit={(e) => { e.preventDefault(); send(text); }}>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Escribe tu pregunta…" maxLength={1000} />
-        <button className="btn sm" style={{ background: color }} disabled={busy || !text.trim()}>Enviar</button>
-      </form>
+      {/* No <form>: if the page is not interactive yet, Enter must not reload it. */}
+      <div className="ia-input">
+        <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); send(text); } }} placeholder="Escribe tu pregunta…" maxLength={1000} enterKeyHint="send" />
+        <button type="button" className="btn sm" style={{ background: color }} disabled={busy || !text.trim()} onClick={() => send(text)}>Enviar</button>
+      </div>
     </div>
   );
 }

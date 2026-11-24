@@ -45,6 +45,9 @@ async function apiHash(forceRefresh = false): Promise<string> {
   return cachedHash;
 }
 
+// The owner's own platform account (the GPSWOX admin), for his assistant in the owner panel.
+export const adminApiHash = () => apiHash();
+
 // Sends a GPRS command (e.g. engineStop) with the admin account.
 export async function adminCommand(deviceId: number, type: string, data?: string): Promise<{ ok: boolean; error?: string }> {
   if (isMock()) {

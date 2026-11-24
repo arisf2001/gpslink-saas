@@ -74,6 +74,7 @@ model Company {
   notifications        Notification[]
   devices              BilledDevice[]
   aiEnabled            Boolean        @default(false)
+  aiFreeUntil          DateTime?
   aiName               String?
   brandColor           String?
   websiteUrl           String?        @db.VarChar(300)
@@ -537,6 +538,8 @@ model SimRenewal {
   reactivation  Boolean   @default(false)
   status        String    @default("PENDING")
   stripeSession String?   @unique
+  ghlInvoiceId  String?
+  ghlUrl        String?   @db.Text
   paidAt        DateTime?
   doneAt        DateTime?
   createdAt     DateTime  @default(now())

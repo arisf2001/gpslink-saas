@@ -1,5 +1,5 @@
 import { checkInternalKey, handleIncoming } from "@/lib/wa";
-import { speech, transcribe } from "@/lib/voice";
+import { readImei, speech, transcribe } from "@/lib/voice";
 
 // A voice note in gets a voice note back, plus the map link as text; text in gets text back.
 export async function POST(req: Request) {
@@ -13,11 +13,17 @@ export async function POST(req: Request) {
   };
   let text = typeof body.text === "string" ? body.text : "";
   if (voice) text = await transcribe(Buffer.from(body.audio, "base64"), typeof body.mime === "string" ? body.mime : "audio/ogg").catch((e) => (console.error("[wa] transcribe", e), ""));
+  if (typeof body.image === "string" && body.image.length > 0) {
+    const imei = await readImei(Buffer.from(body.image, "base64"), typeof body.imageMime === "string" ? body.imageMime : "image/jpeg").catch((e) => (console.error("[wa] imei", e), null));
+    text = `${text}\n[El cliente mandó una foto del equipo. ${imei ? `IMEI/ID leído en la foto: ${imei}` : "No se pudo leer un IMEI en la foto"}]`.trim();
+  }
   const links: string[] = [];
-  const reply = await handleIncoming(body.companyId, body.phone.replace(/\D/g, ""), text, { voice, links }).catch(fail);
+  const options: string[] = [];
+  const reply = await handleIncoming(body.companyId, body.phone.replace(/\D/g, ""), text, { voice, links, options: body.companyId === "gpslinkmeta" ? options : undefined, name: typeof body.name === "string" ? body.name.slice(0, 80) : null }).catch(fail);
   const link = links.length ? links.join("\n") : null;
-  if (!voice || !reply || /https?:\/\//.test(reply)) return Response.json({ reply: reply && link ? `${reply}\n${link}` : reply });
+  const extra = options.length ? { options } : {};
+  if (!voice || !reply || /https?:\/\//.test(reply)) return Response.json({ reply: reply && link ? `${reply}\n${link}` : reply, ...extra });
   const audio = await speech(reply).catch((e) => (console.error("[wa] speech", e), null));
-  if (!audio) return Response.json({ reply: link ? `${reply}\n${link}` : reply });
-  return Response.json({ reply, audio: audio.toString("base64"), link });
+  if (!audio) return Response.json({ reply: link ? `${reply}\n${link}` : reply, ...extra });
+  return Response.json({ reply, audio: audio.toString("base64"), link, ...extra });
 }

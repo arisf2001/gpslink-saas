@@ -1,6 +1,6 @@
 import { runDailyLifecycle } from "./companies";
 import { runDeviceAlerts } from "./device-status";
-import { runSims } from "./sim/notify";
+import { runSims, syncGhlRenewals } from "./sim/notify";
 import { runActivations } from "./activation";
 import { runEventNotifications } from "./notifications";
 import { runBorderZones } from "./border-zones";
@@ -39,8 +39,8 @@ export function startLifecycleScheduler() {
       .then((s) => (s.notices || s.cuts) && console.log("[zonas-rojas]", JSON.stringify(s)))
       .catch((e) => console.error("[zonas-rojas] failed:", e));
   const ghlInvoices = () =>
-    syncGhlInvoices()
-      .then((n) => n && console.log("[facturas-ghl] pagadas:", n))
+    Promise.all([syncGhlInvoices(), syncGhlRenewals()])
+      .then(([n, r]) => (n || r) && console.log("[facturas-ghl] pagadas:", n, "renovaciones:", r))
       .catch((e) => console.error("[facturas-ghl] failed:", e));
   setTimeout(ghlInvoices, 130_000);
   setInterval(ghlInvoices, 5 * 60_000);

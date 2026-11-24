@@ -70,6 +70,13 @@ export async function hasPin(userId: number): Promise<boolean> {
   return !!(await prisma.aiPin.findUnique({ where: { gpswoxUserId: userId } }));
 }
 
+// WhatsApp: the phone already identifies the customer, so the first PIN is created there without the password; never replaces one.
+export async function createPin(userId: number, pin: string): Promise<boolean> {
+  if (!/^\d{4,6}$/.test(pin)) return false;
+  const pinHash = await bcrypt.hash(pin, 10);
+  return prisma.aiPin.create({ data: { gpswoxUserId: userId, pinHash } }).then(() => true, () => false);
+}
+
 export async function setPin(user: AiUser, password: string, pin: string, lang: Lang): Promise<{ ok: boolean; reply: string }> {
   if (!/^\d{4,6}$/.test(pin)) return { ok: false, reply: t(lang, "El PIN debe tener de 4 a 6 números.", "The PIN must have 4 to 6 digits.") };
   if (!(await gps.login(user.email, password))) return { ok: false, reply: t(lang, "La contraseña de GPS Link no es correcta.", "The GPS Link password is not correct.") };

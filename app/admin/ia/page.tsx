@@ -68,6 +68,7 @@ export default async function AdminIaPage({ searchParams }: { searchParams: Prom
                       <input name="brandColor" type="color" defaultValue={c.brandColor ?? "#0F4C5C"} />
                       <button className="btn sm s">Guardar</button>
                     </form>
+                    {c.aiFreeUntil && c.aiFreeUntil > new Date() && <p className="hint" style={{ margin: "4px 0 0" }}>IA gratis hasta el {formatDate(c.aiFreeUntil)}</p>}
                   </td>
                 </tr>
               );
@@ -75,7 +76,7 @@ export default async function AdminIaPage({ searchParams }: { searchParams: Prom
             <tr><td><i>Clientes directos de GPS Link</i></td><td>{direct?._count._all ?? 0}</td><td>{direct?._sum.turns ?? 0}</td><td>{((direct?._sum.tokensIn ?? 0) + (direct?._sum.tokensOut ?? 0)).toLocaleString("es-DO")}</td><td>{setting.enabled ? "Activa" : "Apagada"}</td></tr>
           </tbody>
         </table>
-        <p className="hint" style={{ marginTop: 8 }}>Precio actual: {formatMoney(setting.monthlyPriceCents)} al mes por marca blanca.</p>
+        <p className="hint" style={{ marginTop: 8 }}>Precio actual: {formatMoney(setting.monthlyPriceCents)} al mes por marca blanca. Cuando le activas la IA a una marca blanca por primera vez, los primeros 3 meses son gratis. Con la IA activa también puede usar el Asistente de su panel.</p>
       </div>
 
       <div className="panel" style={{ margin: "14px 0" }}>

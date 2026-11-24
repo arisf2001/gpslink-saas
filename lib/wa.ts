@@ -1,10 +1,12 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { borderEngineReply } from "./border-zones";
 import { redZoneEngineReply } from "./red-zones";
-import { aiSetting, confirmCommand, rateLimit, resolveUser, type AiUser } from "./ai/assistant";
-import { chat } from "./ai/engine";
+import { aiSetting, confirmCommand, createPin, hasPin, rateLimit, resolveUser, type AiUser } from "./ai/assistant";
+import { chat, customerName } from "./ai/engine";
 import { prisma } from "./db";
-import { userApiHash, userPhones, usersByPhone } from "./gpswox";
+import { userApiHash, userPhones, usersByPhone, withGpswoxDb } from "./gpswox";
+import { BRAND } from "./config";
+import type { RowDataPacket } from "mysql2/promise";
 
 const secret = () => {
   const value = process.env.SESSION_SECRET;
@@ -17,8 +19,14 @@ const CONFIRM_MS = 2 * 60_000;
 export const DIRECT_WA = "gpslink";
 // Owner's own number linked by QR: only sends notices/invoices, never answers.
 export const OWNER_WA = "gpslinkowner";
+// The owner's official Meta number (shared by his brands): the credit-saas bot forwards GPS Link customers' messages here.
+export const META_WA = "gpslinkmeta";
+const GREET_AFTER_MS = 12 * 3600_000;
 
 export const internalKey = () => createHmac("sha256", secret()).update("gpslink-wa-internal").digest("hex");
+
+// Token in each GPSWOX alert webhook URL, so only GPSWOX can make GPS Link message that customer.
+export const alertKey = (userId: number) => createHmac("sha256", internalKey()).update(`alert:${userId}`).digest("hex").slice(0, 32);
 
 export function checkInternalKey(value: string | null): boolean {
   const a = Buffer.from(value ?? "");
@@ -78,10 +86,32 @@ export function waNumber(phone: string | null | undefined): string | null {
 export async function queueWa(companyId: string, phone: string | null | undefined, text: string): Promise<boolean> {
   const number = waNumber(phone);
   if (!number) return false;
+  if (companyId === OWNER_WA && !(await ownerQrAllowed(number))) return false;
   const session = await prisma.waSession.findUnique({ where: { companyId } });
   if (session?.status !== "CONNECTED") return false;
   await prisma.waOutbox.create({ data: { companyId, phone: number, text } });
   return true;
+}
+
+let allowed: { at: number; phones: Set<string> } | null = null;
+// The owner's QR number only writes to GPS Link customers (a phone in their profile or a linked WhatsApp) and to the admin.
+export async function ownerQrAllowed(number: string): Promise<boolean> {
+  if (number === waNumber(BRAND.ownerWhatsApp)) return true;
+  if (!allowed || Date.now() - allowed.at > 5 * 60_000) {
+    const links = await prisma.waLink.findMany({ select: { phone: true } });
+    allowed = { at: Date.now(), phones: new Set([...(await profilePhones()), ...links.map((l) => waNumber(l.phone)).filter((p): p is string => !!p)]) };
+  }
+  return allowed.phones.has(number);
+}
+
+// The official Meta number lives in credit-saas: it sends only while the customer's chat there is open (last message < 23 h, no charge).
+export async function metaRelay(phone: string, text: string): Promise<boolean> {
+  const number = waNumber(phone);
+  const url = process.env.META_RELAY_URL ?? "https://app.disputacredit.com/api/webhook/gpslink";
+  if (!number || url === "off") return false;
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "x-wa-key": internalKey() }, body: JSON.stringify({ phone: number, text }), signal: AbortSignal.timeout(20_000) }).catch(() => null);
+  const data = r?.ok ? ((await r.json().catch(() => null)) as { ok?: boolean } | null) : null;
+  return data?.ok === true;
 }
 
 export async function linkPhone(companyId: string, phone: string, user: AiUser) {
@@ -112,10 +142,10 @@ async function idsByPhone(phone: string): Promise<number[]> {
   return [...new Set([...track, ...saas])];
 }
 
-async function linkFromProfile(phone: string): Promise<boolean> {
+async function linkFromProfile(key: string, phone: string): Promise<boolean> {
   if (phone.length < 8) return false;
   const ids = await idsByPhone(phone).catch((): number[] => []);
-  const link = await prisma.waLink.findUnique({ where: { companyId_phone: { companyId: OWNER_WA, phone } } });
+  const link = await prisma.waLink.findUnique({ where: { companyId_phone: { companyId: key, phone } } });
   if (!ids.length) {
     if (link) await prisma.waLink.delete({ where: { id: link.id } });
     return false;
@@ -125,17 +155,32 @@ async function linkFromProfile(phone: string): Promise<boolean> {
   const hash = await userApiHash(ids[0]).catch(() => null);
   const user = hash ? await resolveUser(hash).catch(() => null) : null;
   if (!user) return false;
-  await linkPhone(OWNER_WA, phone, user);
+  await linkPhone(key, phone, user);
   return true;
 }
 
-export async function handleIncoming(companyId: string, phone: string, text: string, opts: { voice?: boolean; links?: string[] } = {}): Promise<string | null> {
-  const owner = companyId === OWNER_WA;
+// Owner mode needs the owner's number and a GPSWOX administrator account behind it.
+async function isAdminUser(userId: number): Promise<boolean> {
+  return withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT group_id FROM users WHERE id = ? AND active = 1", [userId]);
+    return Number(rows[0]?.group_id) === 1;
+  });
+}
+
+// First name to greet with: the gpslinkusa.com company contact, else the name on the person's WhatsApp profile.
+async function firstName(gpswoxUserId: number, profileName: string | null | undefined): Promise<string> {
+  const company = await prisma.company.findFirst({ where: { gpswoxUserId }, select: { contactName: true } }).catch(() => null);
+  const name = (company?.contactName || profileName || "").replace(/[^\p{L}\s'.-]/gu, " ").trim();
+  return name.split(/\s+/)[0]?.slice(0, 30) ?? "";
+}
+
+export async function handleIncoming(companyId: string, phone: string, text: string, opts: { voice?: boolean; links?: string[]; name?: string | null; options?: string[] } = {}): Promise<string | null> {
+  const owner = companyId === OWNER_WA || companyId === META_WA;
   const direct = companyId === DIRECT_WA || owner;
   const company = direct ? null : await prisma.company.findUnique({ where: { id: companyId } });
   if (direct ? !(await aiSetting()).enabled : !company || !company.aiEnabled || company.status === "BLOCKED" || company.status === "CANCELED") return null;
   // The owner's business number only answers platform users, matched by the phone in their profile (no linking step).
-  if (owner && !(await linkFromProfile(phone))) return null;
+  if (owner && !(await linkFromProfile(companyId, phone))) return null;
   const brand = company?.name ?? "GPS Link";
   const message = text.trim().slice(0, 1000);
   if (!message) return opts.voice ? "No pude entender la nota de voz. Intenta otra vez o escríbeme." : "Por ahora solo entiendo mensajes de texto y notas de voz.";
@@ -162,24 +207,45 @@ export async function handleIncoming(companyId: string, phone: string, text: str
   const pending = link.pendingUntil && link.pendingUntil > new Date() ? unseal(link.pendingToken) : null;
   const clearPending = () => prisma.waLink.update({ where: { id: link.id }, data: { pendingToken: null, pendingUntil: null } });
   if (pending && /^\d{4,6}$/.test(message)) {
+    const created = !(await hasPin(user.userId)) && (await createPin(user.userId, message));
     const result = await confirmCommand(user, pending, message, "whatsapp", "es");
     if (result.ok || !/quedan/i.test(result.reply)) await clearPending();
-    return result.reply;
+    return created ? `Guardé tu PIN nuevo: úsalo para confirmar tus próximas órdenes.\n${result.reply}` : result.reply;
   }
   if (pending && /^(cancelar|cancel|no)$/i.test(message)) {
     await clearPending();
     return "Listo, cancelé la orden. No se envió nada al vehículo.";
   }
 
-  const result = await chat({ user, conversationId: link.conversationId, message, lang: "es", deviceId: null, channel: "whatsapp", spoken: opts.voice });
+  const fresh = await prisma.waLink.findUnique({ where: { id: link.id }, select: { conversationId: true, updatedAt: true } });
+  const first = companyId === META_WA && (!fresh?.conversationId || Date.now() - fresh.updatedAt.getTime() > GREET_AFTER_MS);
+  const onFile = first ? await customerName(user.userId).catch(() => null) : null;
+  const greet = first ? (onFile?.first ?? (await firstName(user.userId, opts.name))) : null;
+  const askName = first && onFile === null;
+  const admin = owner && waNumber(phone) === waNumber(BRAND.ownerWhatsApp) && (await isAdminUser(user.userId).catch(() => false));
+  const result = await chat({ user, conversationId: greet === null ? link.conversationId : null, message, lang: "es", deviceId: null, channel: "whatsapp", spoken: opts.voice, greet, askName, admin });
   await prisma.waLink.update({
     where: { id: link.id },
     data: { conversationId: result.conversation_id, pendingToken: result.confirm ? seal(result.confirm.token) : null, pendingUntil: result.confirm ? new Date(Date.now() + CONFIRM_MS) : null },
   });
   let reply = result.reply;
+  // Official Meta number: a last "OPCIONES: a | b" line becomes tap buttons/list there; elsewhere it stays as text.
+  const picked = /(?:^|\n)[ \t]*opciones:[ \t]*([^\n]*\|[^\n]*?)\s*$/i.exec(reply);
+  if (picked) {
+    const choices = picked[1].split("|").map((o) => o.trim().slice(0, 24)).filter(Boolean).slice(0, 10);
+    reply = reply.slice(0, picked.index).trim();
+    // Only the Meta number renders tap options; QR and others keep the choices as text.
+    if (opts.options) opts.options.push(...choices);
+    else if (choices.length) reply += `\nOpciones: ${choices.join(" · ")}`;
+  }
   if (!opts.voice) for (const a of result.actions) if ("url" in a && a.url && !reply.includes(a.url)) reply += `\n${a.label}: ${a.url}`;
   // Voice replies: the map link travels as a separate text message after the voice note.
   if (opts.voice && opts.links) for (const a of result.actions) if (a.type === "open_map") opts.links.push(`${a.label}: ${a.url}`);
-  if (result.confirm) reply += "\n\nPara confirmar responde con tu PIN (tienes 2 minutos) o escribe CANCELAR.";
+  if (result.confirm && opts.options && !opts.options.length) opts.options.push("Cancelar");
+  if (result.confirm) {
+    reply += (await hasPin(user.userId))
+      ? "\n\nPara confirmar responde con tu PIN (tienes 2 minutos) o escribe CANCELAR."
+      : "\n\nTodavía no tienes PIN. Responde con un PIN nuevo de 4 a 6 números (tienes 2 minutos): lo guardo y con él confirmo la orden. O escribe CANCELAR.";
+  }
   return reply;
 }

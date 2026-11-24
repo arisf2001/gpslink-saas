@@ -6,6 +6,7 @@ import { getSession } from "./session";
 export const TAB_OPTIONS = [
   ["clientes", "Mis clientes"],
   ["equipos", "Mis equipos"],
+  ["asistente", "Asistente"],
   ["planes", "Mis planes"],
   ["whatsapp", "Mi WhatsApp"],
   ["correo", "Mi correo"],

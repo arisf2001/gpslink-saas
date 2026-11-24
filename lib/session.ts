@@ -66,11 +66,20 @@ export async function getStaffId(): Promise<string | null> {
   return sub?.includes(":") ? sub.split(":")[1] : null;
 }
 
+const sameText = (x: string, y: string) => {
+  const a = Buffer.from(x);
+  const b = Buffer.from(y);
+  return a.length === b.length && timingSafeEqual(a, b);
+};
+
+// The owner signs in with ADMIN_USERNAME or with his email (ADMIN_EMAIL), always with ADMIN_PASSWORD.
 export function adminCredentialsMatch(username: string, password: string): boolean {
   const expectedUser = process.env.ADMIN_USERNAME ?? "";
   const expectedPass = process.env.ADMIN_PASSWORD ?? "";
-  if (!expectedUser || !expectedPass) return false;
-  const a = Buffer.from(`${username}\n${password}`);
-  const b = Buffer.from(`${expectedUser}\n${expectedPass}`);
-  return a.length === b.length && timingSafeEqual(a, b);
+  if (!expectedPass) return false;
+  const email = (process.env.ADMIN_EMAIL || "arisf2001@gmail.com").trim().toLowerCase();
+  const user = username.trim();
+  if (!user) return false;
+  const userOk = (!!expectedUser && sameText(user, expectedUser)) || sameText(user.toLowerCase(), email);
+  return sameText(password, expectedPass) && userOk;
 }

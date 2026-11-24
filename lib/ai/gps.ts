@@ -174,6 +174,45 @@ export async function sendCustom(hash: string, deviceId: number, data: string): 
   return { ok: false, error: String(res?.error ?? res?.message ?? "sin respuesta") };
 }
 
+export const ALERT_KINDS = ["movement", "overspeed", "stop", "ignition_on", "ignition_off", "ignition", "offline", "sos"] as const;
+export type AlertKind = (typeof ALERT_KINDS)[number];
+
+// GPSWOX alert type per kind (ignition state: 1 only on, 2 only off, 0 both).
+const ALERT_PARAMS: Record<AlertKind, Record<string, string>> = {
+  movement: { type: "move_start", stop_duration: "0.10" },
+  overspeed: { type: "overspeed" },
+  stop: { type: "stop_duration" },
+  ignition_on: { type: "ignition", state: "1" },
+  ignition_off: { type: "ignition", state: "2" },
+  ignition: { type: "ignition", state: "0" },
+  offline: { type: "offline_duration" },
+  sos: { type: "sos" },
+};
+
+// A GPSWOX alert for one vehicle: app push + a webhook so GPS Link also sends it to the customer's WhatsApp.
+export async function addAlert(hash: string, deviceId: number, kind: AlertKind, name: string, value: number, webhook: string): Promise<{ ok: boolean; error?: string }> {
+  if (isMock()) return { ok: true };
+  const params: Record<string, string> = {
+    name, ...ALERT_PARAMS[kind], "devices[0]": String(deviceId), schedule: "0", zone: "0",
+    "notifications[push][active]": "1", "notifications[sound][active]": "1", "notifications[popup][active]": "1", "notifications[popup][input]": "10",
+    "notifications[webhook][active]": "1", "notifications[webhook][input]": webhook,
+  };
+  if (kind === "overspeed") params.overspeed = String(value);
+  if (kind === "stop") params.stop_duration = String(value);
+  if (kind === "offline") params.offline_duration = String(value);
+  const data = (await userCall(hash, "add_alert", params, "POST").catch((e: Error) => ({ status: 0, message: e.message }))) as { status?: number; message?: string; errors?: Record<string, string[]> };
+  if (data?.status === 1) return { ok: true };
+  return { ok: false, error: data?.errors ? Object.values(data.errors).flat().join(" ") : (data?.message ?? "error") };
+}
+
+// GPSWOX only fires ignition alerts when the device has an ignition sensor: Traccar's "ignition" attribute (true/false).
+export async function addIgnitionSensor(hash: string, deviceId: number): Promise<boolean> {
+  if (isMock()) return true;
+  const params = { device_id: String(deviceId), sensor_type: "ignition", sensor_name: "Encendido", tag_name: "ignition", on_type: "1", on_tag_value: "true", off_type: "1", off_tag_value: "false" };
+  const data = (await userCall(hash, "add_sensor", params, "POST").catch(() => null)) as { status?: number } | null;
+  return data?.status === 1;
+}
+
 export function streetViewUrl(lat: number, lng: number): string {
   return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`;
 }

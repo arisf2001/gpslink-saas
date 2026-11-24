@@ -7,7 +7,9 @@ import { formatDate, formatMoney } from "../format";
 import { emailHtml, sendEmail, type ChannelResult } from "../notify";
 import { pushAdmin } from "../push";
 import { daysLeft, DAY, MONTHLY_CARRIERS, NEWSIM, ONCE, possibleSwap, statusLabel, SWAP_DAYS } from "./carriers";
-import { lastSignals } from "../gpswox";
+import { lastSignals, setDeviceExpiration, withGpswoxDb } from "../gpswox";
+import { ghlConfig, ghlInvoiceStatus, ghlText2Pay, ghlVoid } from "../ghl";
+import type { RowDataPacket } from "mysql2/promise";
 import { fillDeviceProfiles, refreshOnceQuota, syncNewsim, syncOnce, syncSims } from "./sync";
 import { notify } from "../notifications";
 
@@ -35,7 +37,10 @@ export async function ensureRenewal(card: SimCard, now = new Date()): Promise<Si
   if (!q) return null;
   const open = await prisma.simRenewal.findFirst({ where: { iccid: card.iccid, status: "PENDING" }, orderBy: { createdAt: "desc" } });
   if (open && open.amountCents === q.amountCents && open.reactivation === q.reactivation && (open.expiresAt?.getTime() ?? 0) === (card.expiresAt?.getTime() ?? 0)) return open;
-  if (open) await prisma.simRenewal.update({ where: { id: open.id }, data: { status: "CANCELED" } });
+  if (open) {
+    await prisma.simRenewal.update({ where: { id: open.id }, data: { status: "CANCELED" } });
+    await voidGhl(open);
+  }
   return prisma.simRenewal.create({
     data: { token: randomBytes(18).toString("base64url"), iccid: card.iccid, expiresAt: card.expiresAt, amountCents: q.amountCents, currency: q.currency, reactivation: q.reactivation },
   });
@@ -313,12 +318,59 @@ export async function applySimCheckout(session: Stripe.Checkout.Session) {
   if (!renewalId || session.payment_status !== "paid" || session.mode !== "payment") return null;
   const renewal = await prisma.simRenewal.findUnique({ where: { id: renewalId } });
   if (!renewal || renewal.status !== "PENDING" || (session.amount_total ?? 0) < renewal.amountCents) return renewal;
-  const paid = await prisma.simRenewal.update({ where: { id: renewal.id }, data: { status: "PAID", paidAt: new Date(), stripeSession: session.id } });
+  return renewalPaid(renewal, "Stripe", { stripeSession: session.id });
+}
+
+// Paid renewal: the admin reactivates the SIM with the carrier; a direct client's expired membership gets one more year now.
+async function renewalPaid(renewal: SimRenewal, via: string, extra: { stripeSession?: string } = {}) {
+  const paid = await prisma.simRenewal.update({ where: { id: renewal.id }, data: { status: "PAID", paidAt: new Date(), ...extra } });
   const card = await prisma.simCard.findUnique({ where: { iccid: renewal.iccid } });
-  await prisma.simEvent.create({ data: { iccid: renewal.iccid, kind: "paid", detail: `Pagó ${formatMoney(renewal.amountCents, renewal.currency)} por Stripe` } });
+  await prisma.simEvent.create({ data: { iccid: renewal.iccid, kind: "paid", detail: `Pagó ${formatMoney(renewal.amountCents, renewal.currency)} por ${via}` } });
   await pushAdmin({ title: "SIM pagada: reactivar", body: `${renewal.iccid}${card?.deviceName ? ` · ${card.deviceName}` : ""} · ${formatMoney(renewal.amountCents, renewal.currency)}`, url: "/admin/sim?f=pagadas" });
   await sendEmail(reportTo(), `SIM pagada: reactivar ${renewal.iccid}`, emailHtml("Una SIM fue pagada", [`ICCID ${renewal.iccid}${card?.deviceName ? ` · ${card.deviceName}` : ""}.`, `Monto: ${formatMoney(renewal.amountCents, renewal.currency)}.`, "Renueva el plan en el panel del proveedor y márcala como reactivada."], { label: "Abrir Tarjetas SIM", url: `${appUrl()}/admin/sim?f=pagadas` }));
   if (card) await noticeOnce(card.iccid, "paid", `${renewal.id}:paid`, () => toClient(card, "Recibimos tu pago de la SIM", "¡Gracias! Recibimos tu pago", [`Pago de ${formatMoney(renewal.amountCents, renewal.currency)} para la SIM ${vehicle(card)}.`, "La reactivación puede tardar hasta 5 días laborables. Te avisamos cuando esté lista."]));
+  if (via !== "GHL") await voidGhl(renewal);
+  if (card?.deviceId && !card.companyId) await extendMembership(card.deviceId).catch((e) => console.error("[sim] membresía:", (e as Error).message));
+  return paid;
+}
+
+// A renewal paid another way or replaced: its GHL invoice can no longer be paid.
+async function voidGhl(r: SimRenewal) {
+  const cfg = ghlConfig();
+  if (cfg && r.ghlInvoiceId) await ghlVoid(cfg, r.ghlInvoiceId).catch(() => false);
+}
+
+async function extendMembership(deviceId: number) {
+  const current = await withGpswoxDb(async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>("SELECT IF(expiration_date > '2000-01-01', DATE_FORMAT(expiration_date, '%Y-%m-%dT%H:%i:%sZ'), NULL) AS exp FROM devices WHERE id = ?", [deviceId]);
+    return rows[0]?.exp ? new Date(String(rows[0].exp)) : null;
+  });
+  if (!current) return;
+  const from = current.getTime() > Date.now() ? current : new Date();
+  await setDeviceExpiration(deviceId, new Date(from.getTime() + 365 * DAY));
+}
+
+// GHL payment link for a renewal (WhatsApp assistant); GHL never emails the client.
+export async function renewalGhlUrl(renewal: SimRenewal, card: SimCard, customer: { name: string; email: string; phone: string | null }): Promise<string> {
+  if (renewal.ghlUrl) return renewal.ghlUrl;
+  const cfg = ghlConfig();
+  if (!cfg) throw new Error("GHL no está configurado.");
+  const title = `Renovación anual GPS ${vehicle(card)}${renewal.reactivation ? " (con reactivación)" : ""}`;
+  const ghl = await ghlText2Pay(cfg, { ...customer, title, items: [{ desc: title, qty: 1, unitCents: renewal.amountCents }], dueAt: new Date(Date.now() + 7 * DAY), note: null });
+  await prisma.simRenewal.update({ where: { id: renewal.id }, data: { ghlInvoiceId: ghl.id, ghlUrl: ghl.url } });
+  return ghl.url;
+}
+
+export async function syncGhlRenewals(): Promise<number> {
+  const cfg = ghlConfig();
+  if (!cfg) return 0;
+  const open = await prisma.simRenewal.findMany({ where: { status: "PENDING", ghlInvoiceId: { not: null } } });
+  let paid = 0;
+  for (const r of open) {
+    if ((await ghlInvoiceStatus(cfg, r.ghlInvoiceId!).catch(() => null)) !== "paid") continue;
+    await renewalPaid(r, "GHL");
+    paid++;
+  }
   return paid;
 }
 

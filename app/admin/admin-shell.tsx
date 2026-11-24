@@ -17,13 +17,15 @@ export async function AdminShell({ children }: { children: React.ReactNode }) {
           </Link>
           <div className="admin-nav">
             <Link href="/admin">Empresas</Link>
+            <Link href="/admin/asistente">Asistente</Link>
             <Link href="/admin/planes">Precios</Link>
             <Link href="/admin/facturas">Facturas</Link>
             <Link href="/admin/equipos">Equipos</Link>
             <Link href="/admin/sim">Tarjetas SIM</Link>
             <Link href="/admin/activacion">Activación</Link>
-            <Link href="/admin/ia">Asistente IA</Link>
+            <Link href="/admin/ia">Ajustes de IA</Link>
             <Link href="/admin/whatsapp">WhatsApp</Link>
+            <Link href="/admin/seguridad">Seguridad</Link>
             <Link href="/admin/tickets">Tickets{openTickets ? ` (${openTickets})` : ""}</Link>
             <PushButton publicKey={vapidPublicKey()} />
             <form action={adminLogoutAction}><button className="btn sm s">Salir</button></form>
