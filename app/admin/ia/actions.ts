@@ -8,6 +8,8 @@ import { prisma } from "@/lib/db";
 import { parseMoneyToCents } from "@/lib/format";
 import { getSession } from "@/lib/session";
 
+const AI_FREE_MONTHS = 3;
+
 async function requireAdmin() {
   if (!(await getSession("admin"))) redirect("/admin");
 }
@@ -25,9 +27,15 @@ export async function saveAiSettingAction(formData: FormData) {
 export async function setCompanyAiAction(formData: FormData) {
   await requireAdmin();
   const color = String(formData.get("brandColor") ?? "").trim();
+  const id = String(formData.get("companyId"));
+  const aiEnabled = formData.get("aiEnabled") === "on";
+  const current = await prisma.company.findUnique({ where: { id }, select: { aiFreeUntil: true } });
+  // The first time the owner turns the AI on, its first 3 months are free.
+  const free = new Date();
+  free.setMonth(free.getMonth() + AI_FREE_MONTHS);
   await prisma.company.update({
-    where: { id: String(formData.get("companyId")) },
-    data: { aiEnabled: formData.get("aiEnabled") === "on", aiName: String(formData.get("aiName") ?? "").trim().slice(0, 60) || null, brandColor: /^#[0-9a-fA-F]{6}$/.test(color) ? color : null },
+    where: { id },
+    data: { aiEnabled, ...(aiEnabled && !current?.aiFreeUntil ? { aiFreeUntil: free } : {}), aiName: String(formData.get("aiName") ?? "").trim().slice(0, 60) || null, brandColor: /^#[0-9a-fA-F]{6}$/.test(color) ? color : null },
   });
   redirect("/admin/ia?ok=Empresa actualizada");
 }

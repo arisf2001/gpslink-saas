@@ -74,6 +74,7 @@ model Company {
   notifications        Notification[]
   devices              BilledDevice[]
   aiEnabled            Boolean        @default(false)
+  aiFreeUntil          DateTime?
   aiName               String?
   brandColor           String?
   websiteUrl           String?        @db.VarChar(300)

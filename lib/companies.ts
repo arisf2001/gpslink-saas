@@ -201,7 +201,8 @@ export async function createInvoice(company: Company, now = new Date()) {
   const items = unit > 0 ? found.items : [];
   const { newDevices, renewals } = unit > 0 ? found : { newDevices: 0, renewals: 0 };
   const setting = company.aiEnabled ? await prisma.aiSetting.findUnique({ where: { id: 1 } }) : null;
-  const aiCents = setting && company.trialEndsAt < period.end ? setting.monthlyPriceCents : 0;
+  const aiFree = company.trialEndsAt >= period.end || (!!company.aiFreeUntil && company.aiFreeUntil >= period.end);
+  const aiCents = setting && !aiFree ? setting.monthlyPriceCents : 0;
   if (!items.length && aiCents <= 0) return null;
   const invoice = await prisma.$transaction(async (tx) => {
     const created = await tx.invoice.create({
