@@ -212,7 +212,7 @@ export function manageTools(scope: Scope, users: number[] | null, actorId: numbe
         const [[count]] = await conn.query<RowDataPacket[]>(`SELECT COUNT(*) AS n ${from}`, args);
         const [rows] = await conn.query<RowDataPacket[]>(
           `SELECT d.id, d.name, ${day("d.expiration_date")} AS membership_expires, DATE_FORMAT(t.server_time, '%Y-%m-%dT%H:%i:%sZ') AS reported,
-                  (SELECT u.email FROM user_device_pivot p JOIN users u ON u.id = p.user_id WHERE p.device_id = d.id ORDER BY u.group_id = 2 DESC, u.group_id DESC LIMIT 1) AS account
+                  (SELECT u.email FROM user_device_pivot p JOIN users u ON u.id = p.user_id WHERE p.device_id = d.id AND ${inList("p.user_id", users)} ORDER BY u.group_id = 2 DESC, u.group_id DESC LIMIT 1) AS account
              ${from} ORDER BY ${f === "offline" ? "t.server_time" : "d.expiration_date"} LIMIT 40`,
           args,
         );
