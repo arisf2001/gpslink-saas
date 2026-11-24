@@ -58,7 +58,9 @@ export async function authenticate(req: Request, hashFromRequest: unknown, lang:
   if (!hash) return apiError(401, "session_expired", t(lang, "Inicia sesión otra vez.", "Please log in again."));
   try {
     const user = await resolveUser(hash);
-    return { user, channel, scope, config: await assistantConfig(user, lang) };
+    const config = await assistantConfig(user, lang);
+    // The owner's own panel assistant does not depend on the switch for direct customers.
+    return { user, channel, scope, config: scope?.kind === "owner" ? { ...config, enabled: true } : config };
   } catch (e) {
     if (e instanceof SessionError) return apiError(401, "session_expired", t(lang, "Tu sesión de GPS Link venció. Inicia sesión otra vez.", "Your GPS Link session expired. Please log in again."));
     console.error("[ia] auth", e);
